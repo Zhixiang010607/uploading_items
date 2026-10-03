@@ -5,6 +5,7 @@ const ENV_ID = process.env.TCB_ENV_ID || "yanyujie-upload-item-d1ab8962386";
 const IMAGE_BUCKET = process.env.IMAGE_BUCKET || "temu-product-images";
 const MIAOSHOU_BASE_URL = "https://openapi-erp.91miaoshou.com";
 const MAX_ITEMS = 12000;
+const DB_PAGE_SIZE = 1000;
 const SIGN_CHUNK_LIMIT = 50;
 const IMPORT_CHUNK_LIMIT = 24;
 
@@ -161,18 +162,31 @@ async function createBatch(db, input) {
   return { ...batch, resumed: false };
 }
 
+async function readBatchItems(db, batchId, columns = "*") {
+  const rows = [];
+  for (let offset = 0; ; offset += DB_PAGE_SIZE) {
+    const page = await db.from("temu_upload_items")
+      .select(columns)
+      .eq("batch_id", batchId)
+      .order("product_index")
+      .order("image_position")
+      .range(offset, offset + DB_PAGE_SIZE - 1);
+    if (page.error) throw new ApiError(500, "读取图片清单失败", page.error);
+    rows.push(...(page.data || []));
+    if (!page.data || page.data.length < DB_PAGE_SIZE) return rows;
+  }
+}
+
 async function batchStatus(db, batchId, includeItems = false) {
   const batchResult = await db.from("temu_upload_batches").select("*").eq("id", batchId).single();
   if (batchResult.error || !batchResult.data) throw new ApiError(404, "批次不存在");
   const result = { batch: batchResult.data };
   if (includeItems) {
-    const itemsResult = await db.from("temu_upload_items")
-      .select("product_index,image_position,object_key,size_bytes,sha256,mime_type,storage_status,erp_status,error_message")
-      .eq("batch_id", batchId)
-      .order("product_index")
-      .order("image_position");
-    if (itemsResult.error) throw new ApiError(500, "读取图片清单失败", itemsResult.error);
-    result.items = itemsResult.data;
+    result.items = await readBatchItems(
+      db,
+      batchId,
+      "product_index,image_position,object_key,size_bytes,sha256,mime_type,storage_status,erp_status,error_message"
+    );
   }
   return result;
 }
@@ -182,12 +196,13 @@ async function signUploads(db, storage, batchId, slots) {
     throw new ApiError(400, `每次签名数量必须为 1-${SIGN_CHUNK_LIMIT}`);
   }
   const normalized = slots.map((slot) => `${Number(slot.productIndex)}.${Number(slot.imagePosition)}`);
-  const all = await db.from("temu_upload_items")
-    .select("product_index,image_position,object_key,size_bytes,sha256,mime_type,storage_status")
-    .eq("batch_id", batchId);
-  if (all.error) throw new ApiError(500, "读取图片清单失败", all.error);
+  const all = await readBatchItems(
+    db,
+    batchId,
+    "product_index,image_position,object_key,size_bytes,sha256,mime_type,storage_status"
+  );
   const wanted = new Set(normalized);
-  const items = all.data.filter((item) => wanted.has(`${item.product_index}.${item.image_position}`));
+  const items = all.filter((item) => wanted.has(`${item.product_index}.${item.image_position}`));
   if (items.length !== wanted.size) throw new ApiError(400, "签名请求包含不属于该批次的图片");
 
   const bucket = storage.from(IMAGE_BUCKET);
@@ -225,9 +240,8 @@ async function importImages(db, storage, batchId, slots) {
     throw new ApiError(409, "图片尚未全部通过云端校验，不能导入妙手");
   }
   const wanted = new Set(slots.map((slot) => `${Number(slot.productIndex)}.${Number(slot.imagePosition)}`));
-  const query = await db.from("temu_upload_items").select("*").eq("batch_id", batchId);
-  if (query.error) throw new ApiError(500, "读取待导入图片失败", query.error);
-  const items = query.data.filter((item) => wanted.has(`${item.product_index}.${item.image_position}`));
+  const query = await readBatchItems(db, batchId);
+  const items = query.filter((item) => wanted.has(`${item.product_index}.${item.image_position}`));
   const bucket = storage.from(IMAGE_BUCKET);
   const output = [];
   for (const item of items) {

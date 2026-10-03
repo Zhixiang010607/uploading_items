@@ -5,22 +5,14 @@ const cloudApp = window.cloudbase?.init({
 });
 const imageBucket = cloudApp?.storage.from(APP_CONFIG.bucket);
 
-const tasks = [];
 let products = [];
 let selected = new Set();
 let imageFilesBySlot = new Map();
 let publishRunning = false;
+let uploadWakeLock = null;
 let erpReady = false;
 let activeBatchId = localStorage.getItem("temu-active-batch") || "";
 let importState = emptyImportState();
-
-const pageMeta = {
-  publish: ["发布商品", "读取本地资料并创建发布任务"],
-  drafts: ["商品草稿", "当前流程不保存草稿"],
-  tasks: ["发布任务", "查看本次浏览器会话中的任务进度"],
-  templates: ["模板中心", "模板来自妙手 ERP"],
-  settings: ["接入设置", "检查腾讯云与妙手开放平台连接"]
-};
 
 function emptyImportState() {
   return {
@@ -171,10 +163,12 @@ function refreshImportValidation() {
       : "选择图片文件夹后自动检查。";
     summary.innerHTML = `<span id="selectedCount">${selected.size}</span> 个产品：${importState.titleCount} 个 Excel 标题；${escapeHtml(detail)}`;
   }
-  if (!publishRunning) {
+  if (!APP_CONFIG.liveWritesEnabled) {
+    setSubmitStatus("安全测试模式", "当前不会上传、导入或发布任何真实数据。", null, null, "warning");
+  } else if (!publishRunning) {
     setSubmitStatus(
       importState.valid ? "本地资料检查通过" : "等待选择完整资料",
-      importState.valid ? "创建任务时会先上传全部图片，再由云端逐张复核。" : (errors[0] || "请选择 Excel 和完整图片文件夹。"),
+      importState.valid ? "发布前会先上传全部图片，再由云端逐张复核。" : (errors[0] || "请选择 Excel 和完整图片文件夹。"),
       null,
       null,
       importState.valid ? "success" : "warning"
@@ -353,6 +347,23 @@ function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+async function requestUploadWakeLock() {
+  if (!("wakeLock" in navigator) || document.visibilityState !== "visible" || uploadWakeLock) return;
+  try {
+    uploadWakeLock = await navigator.wakeLock.request("screen");
+    uploadWakeLock.addEventListener("release", () => { uploadWakeLock = null; }, { once: true });
+  } catch {
+    uploadWakeLock = null;
+  }
+}
+
+async function releaseUploadWakeLock() {
+  if (!uploadWakeLock) return;
+  const lock = uploadWakeLock;
+  uploadWakeLock = null;
+  await lock.release().catch(() => {});
+}
+
 async function uploadOne(serverItem, manifestItem) {
   const slot = `${manifestItem.productIndex}.${manifestItem.imagePosition}`;
   const file = imageFilesBySlot.get(slot);
@@ -381,17 +392,44 @@ async function uploadOne(serverItem, manifestItem) {
 
 async function uploadAndVerify(batchId, manifestItems) {
   let verified = await api(`/batches/${batchId}/finalize`, { method: "POST", body: {} });
+  const manifestBySlot = new Map(manifestItems.map((item) => [`${item.productIndex}.${item.imagePosition}`, item]));
   for (let round = 1; round <= 5 && !verified.complete; round += 1) {
     const status = await api(`/batches/${batchId}`);
     const pending = status.items.filter((item) => item.storage_status !== "uploaded");
-    const manifestBySlot = new Map(manifestItems.map((item) => [`${item.productIndex}.${item.imagePosition}`, item]));
-    let done = manifestItems.length - pending.length;
-    setSubmitStatus("正在上传全部图片", `第 ${round} 轮：仅重试尚未通过云端核验的图片。`, done, manifestItems.length, "warning");
+    let settled = 0;
+    let failures = 0;
+    setSubmitStatus("正在上传全部图片", `第 ${round} 轮：仅重试尚未通过云端核验的图片。`, manifestItems.length - pending.length, manifestItems.length, "warning");
     await mapWithConcurrency(pending, 4, async (item) => {
       const slot = `${item.product_index}.${item.image_position}`;
-      await uploadOne(item, manifestBySlot.get(slot));
-      done += 1;
-      setSubmitStatus("正在上传全部图片", "上传中，请保持网页打开。", done, manifestItems.length, "warning");
+      try {
+        await uploadOne(item, manifestBySlot.get(slot));
+      } catch {
+        failures += 1;
+      } finally {
+        settled += 1;
+        const current = manifestItems.length - pending.length + settled;
+        setSubmitStatus("正在上传全部图片", "可切换到其他软件；请保持浏览器和本页面开启。", current, manifestItems.length, "warning");
+      }
+    });
+    verified = await api(`/batches/${batchId}/finalize`, { method: "POST", body: {} });
+    if (!verified.complete && failures) await sleep(Math.min(30000, 3000 * round));
+  }
+
+  if (!verified.complete) {
+    const status = await api(`/batches/${batchId}`);
+    const pending = status.items.filter((item) => item.storage_status !== "uploaded");
+    let settled = 0;
+    setSubmitStatus("正在执行最终恢复", `常规重试结束，最后补传 ${pending.length} 张失败图片。`, 0, pending.length, "warning");
+    await mapWithConcurrency(pending, 4, async (item) => {
+      const slot = `${item.product_index}.${item.image_position}`;
+      try {
+        await uploadOne(item, manifestBySlot.get(slot));
+      } catch {
+        // Final verification below remains authoritative; failed files are never marked complete.
+      } finally {
+        settled += 1;
+        setSubmitStatus("正在执行最终恢复", "逐张补传并等待最终云端核验。", settled, pending.length, "warning");
+      }
     });
     verified = await api(`/batches/${batchId}/finalize`, { method: "POST", body: {} });
   }
@@ -418,20 +456,22 @@ async function importAllImages(batchId, total) {
     status = await api(`/batches/${batchId}`);
     pending = status.items.filter((item) => item.erp_status !== "imported");
   }
-  if (pending.length) throw new Error(`仍有 ${pending.length} 张图片未成功导入妙手，任务已保留，可再次重试`);
+  if (pending.length) throw new Error(`仍有 ${pending.length} 张图片未成功导入妙手，当前批次已保留，可再次重试`);
 }
 
 async function runPublishFlow() {
   if (publishRunning) return;
+  if (!APP_CONFIG.liveWritesEnabled) return showToast("真实写入尚未启用", "当前为安全测试模式，不会上传、导入或发布真实数据。", "warning");
   if (!importState.valid) return showToast("资料检查未通过", importState.errors[0] || "请选择完整资料", "warning");
   if (selected.size !== products.length) return showToast("必须提交全部产品", "为保证文件夹不多不少，请保持全部产品选中。", "warning");
-  if (!erpReady) return showToast("妙手应用尚不可用", "请先在妙手开放平台启用或审核应用，再点击接入设置中的连接检查。", "warning");
+  if (!erpReady) return showToast("妙手应用尚不可用", "请先等待妙手开放平台审核通过，再点击“重新读取 ERP”。", "warning");
   if (!["#storeSelect", "#productTemplateSelect", "#skuTemplateSelect"].every((selector) => getSelectedValue(selector))) {
     return showToast("店铺或模板未选择", "请选择目标店铺、产品模板和 SKU 模板。", "warning");
   }
   if (!imageBucket) return showToast("腾讯云组件未连接", "请刷新网页后重试。", "warning");
 
   publishRunning = true;
+  await requestUploadWakeLock();
   const button = document.querySelector("#publishBtn");
   button.disabled = true;
   try {
@@ -454,24 +494,15 @@ async function runPublishFlow() {
     const verified = await uploadAndVerify(activeBatchId, items);
     setSubmitStatus("云端图片全部核验成功", `${verified.expected_count} 张图片不多、不少，编号和内容均一致。`, verified.expected_count, verified.expected_count, "success");
     await importAllImages(activeBatchId, items.length);
-    tasks.unshift({
-      id: activeBatchId,
-      name: `${getSelectedLabel("#storeSelect")} · ${getSelectedLabel("#productTemplateSelect")}`,
-      count: products.length,
-      status: "图片已就绪",
-      progress: 100,
-      time: "刚刚",
-      detail: `${items.length} 张图片全部上传并导入`
-    });
-    renderTasks();
     setSubmitStatus("全部图片已上传并导入", "图片已完整进入妙手；商品发布接口需在应用权限启用后继续。", items.length, items.length, "success");
     showToast("整批图片处理完成", `${items.length} 张图片全部上传、校验并导入成功。`, "success");
   } catch (error) {
-    setSubmitStatus("任务已暂停", error.message, null, null, "error");
-    showToast("创建任务未完成", error.message, "warning");
+    setSubmitStatus("发布已暂停", error.message, null, null, "error");
+    showToast("商品发布未完成", error.message, "warning");
   } finally {
     publishRunning = false;
     button.disabled = false;
+    await releaseUploadWakeLock();
   }
 }
 
@@ -549,33 +580,6 @@ async function syncERP(showResult = false) {
   iconRefresh();
 }
 
-function renderTasks() {
-  const list = document.querySelector("#taskList");
-  list.innerHTML = tasks.length ? tasks.map((task) => `<div class="list-row task-row">
-    <div><h3>${escapeHtml(task.name)}</h3><p>${escapeHtml(task.id)} · ${task.count} 个商品</p></div>
-    <div><div class="progress-track"><span style="width:${task.progress}%"></span></div><small>${escapeHtml(task.detail)}</small></div>
-    <div class="task-meta"><span><i data-lucide="clock-3"></i>${task.time}</span><span class="tag success">${task.status}</span></div>
-    <div class="task-actions"><button class="icon-btn row-action" title="查看详情"><i data-lucide="eye"></i></button></div>
-  </div>`).join("") : '<div class="empty-state">本次会话还没有任务</div>';
-  document.querySelector("#todayTaskCount").textContent = tasks.length;
-  document.querySelector("#taskBadge").textContent = tasks.length;
-  iconRefresh();
-}
-
-function renderDrafts() {
-  document.querySelector("#draftList").innerHTML = '<div class="empty-state">当前流程不保存草稿。资料完整后直接创建发布任务。</div>';
-}
-
-function switchView(viewName) {
-  document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
-  document.querySelector(`#view-${viewName}`).classList.add("active");
-  document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === viewName));
-  document.querySelector("#pageTitle").textContent = pageMeta[viewName][0];
-  document.querySelector("#pageSubtitle").textContent = pageMeta[viewName][1];
-  closeSidebar();
-  window.scrollTo({ top: 0, behavior: "smooth" });
-}
-
 function openDialog(title, subtitle, body) {
   document.querySelector("#dialogTitle").textContent = title;
   document.querySelector("#dialogSubtitle").textContent = subtitle;
@@ -608,8 +612,14 @@ function closeSidebar() {
 }
 
 function initEvents() {
-  document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("click", () => switchView(item.dataset.view)));
-  document.querySelectorAll("[data-view-link]").forEach((item) => item.addEventListener("click", () => switchView(item.dataset.viewLink)));
+  document.addEventListener("visibilitychange", () => {
+    if (publishRunning && document.visibilityState === "visible") requestUploadWakeLock();
+  });
+  window.addEventListener("beforeunload", (event) => {
+    if (!publishRunning) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
   document.querySelector("#menuBtn").addEventListener("click", () => {
     document.querySelector("#sidebar").classList.add("open");
     document.querySelector("#mobileBackdrop").classList.add("show");
@@ -632,14 +642,9 @@ function initEvents() {
   });
   document.querySelector("#productSearch").addEventListener("input", (event) => renderProducts(event.target.value));
   document.querySelector("#publishBtn").addEventListener("click", runPublishFlow);
-  document.querySelector("#testMiaoshou").addEventListener("click", () => syncERP(true));
+  document.querySelector("#refreshERP").addEventListener("click", () => syncERP(true));
   document.querySelector("#skuTemplateSelect").addEventListener("change", () => renderProducts(document.querySelector("#productSearch").value));
   document.querySelector("#filterBtn").addEventListener("click", () => showToast("当前显示全部商品", "可使用搜索框按标题或序号查找。", "success"));
-  document.querySelector("#refreshTasks").addEventListener("click", renderTasks);
-  document.querySelector("#newTemplateBtn").addEventListener("click", () => showToast("模板来自妙手 ERP", "请先在 ERP 网页建立模板，再回到这里同步。", "warning"));
-  document.querySelectorAll(".placeholder-action").forEach((button) => button.addEventListener("click", () => {
-    showToast("尚未启用 TEMU 官方路线", "当前版本使用妙手开放平台发布。", "warning");
-  }));
   document.querySelector("#dialogClose").addEventListener("click", closeDialog);
   document.querySelector("#dialogCancel").addEventListener("click", closeDialog);
   document.querySelector("#dialogConfirm").addEventListener("click", closeDialog);
@@ -648,9 +653,12 @@ function initEvents() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  if (!APP_CONFIG.liveWritesEnabled) {
+    const button = document.querySelector("#publishBtn");
+    button.disabled = true;
+    button.title = "安全测试模式：妙手审核通过并经确认后启用";
+  }
   renderProducts();
-  renderDrafts();
-  renderTasks();
   initEvents();
   refreshImportValidation();
   syncERP(false);

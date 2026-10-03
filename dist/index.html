@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#101820" />
     <meta
       name="description"
-      content="用于批量整理图片、商品资料并创建 TEMU 发布任务的运营工作台。"
+      content="用于批量整理图片和商品资料的 TEMU 全托管发布页面。"
     />
     <title>TEMU 商品发布助手</title>
     <link
@@ -27,8 +27,8 @@
         <div class="brand">
           <div class="brand-mark">T</div>
           <div>
-            <strong>TEMU 发布助手</strong>
-            <span>商品运营工作台</span>
+            <strong>TEMU 全托管发布</strong>
+            <span>商品批量发布</span>
           </div>
           <button class="icon-btn sidebar-close" id="sidebarClose" aria-label="关闭导航">
             <i data-lucide="x"></i>
@@ -39,15 +39,6 @@
           <button class="nav-item active" data-view="publish">
             <i data-lucide="package-plus"></i><span>发布商品</span>
           </button>
-          <button class="nav-item" data-view="tasks">
-            <i data-lucide="list-checks"></i><span>发布任务</span><b id="taskBadge">0</b>
-          </button>
-          <button class="nav-item" data-view="templates">
-            <i data-lucide="layout-template"></i><span>模板中心</span>
-          </button>
-          <button class="nav-item" data-view="settings">
-            <i data-lucide="settings-2"></i><span>接入设置</span>
-          </button>
         </nav>
 
         <div class="sidebar-foot">
@@ -55,7 +46,7 @@
             <span class="status-dot warning"></span>
             <div><strong>正在连接云端</strong><span>正在检查妙手接口</span></div>
           </div>
-          <button class="text-btn" data-view-link="settings">查看接入状态</button>
+          <small class="credential-state">App ID / Key 已由后端绑定</small>
         </div>
       </aside>
 
@@ -68,18 +59,9 @@
           </button>
           <div class="page-heading">
             <h1 id="pageTitle">发布商品</h1>
-            <p id="pageSubtitle">整理本地商品资料并创建发布任务</p>
+            <p id="pageSubtitle">TEMU 全托管商品批量发布</p>
           </div>
-          <div class="top-actions">
-            <button class="icon-btn" aria-label="查看通知" title="通知">
-              <i data-lucide="bell"></i><span class="notice-mark"></span>
-            </button>
-            <button class="account-btn">
-              <span class="avatar">管</span>
-              <span class="account-copy"><strong>管理员</strong><small>本地工作区</small></span>
-              <i data-lucide="chevron-down"></i>
-            </button>
-          </div>
+          <span class="managed-badge"><i data-lucide="store"></i>TEMU 全托管</span>
         </header>
 
         <div class="workspace">
@@ -88,7 +70,7 @@
               <button class="step active" data-step-target="source"><span>1</span>导入资料</button>
               <button class="step" data-step-target="channel"><span>2</span>店铺与模板</button>
               <button class="step" data-step-target="review"><span>3</span>检查商品</button>
-              <button class="step" data-step-target="submit"><span>4</span>创建任务</button>
+              <button class="step" data-step-target="submit"><span>4</span>发布商品</button>
             </div>
 
             <section class="panel-section" id="source">
@@ -116,7 +98,7 @@
 
             <section class="panel-section" id="channel">
               <div class="section-title">
-                <div><h2>选择店铺与模板</h2><p>店铺、产品模板和 SKU 模板均来自 ERP 网页中已经建立的数据。</p></div>
+                <div><h2>调用 ERP 店铺与模板</h2><p>只读取 ERP 中已经建立好的店铺、产品模板和 SKU 模板，本网站不创建模板。</p></div>
                 <span class="section-state"><i data-lucide="refresh-cw"></i>正在同步 ERP</span>
               </div>
               <div class="erp-select-grid">
@@ -147,7 +129,7 @@
               </div>
               <div class="erp-source-note">
                 <span><i data-lucide="database"></i>来源：ERP 已授权店铺和已建立模板</span>
-                <button class="text-btn" data-view-link="templates">查看模板</button>
+                <button class="text-btn" id="refreshERP">重新读取 ERP</button>
               </div>
             </section>
 
@@ -175,101 +157,18 @@
             <section class="submit-bar" id="submit">
               <div class="submit-status">
                 <span class="status-dot warning" id="submitStatusDot"></span>
-                <p><strong id="submitStatusTitle">等待选择完整资料</strong><small id="submitStatusText">整个文件夹全部上传并校验成功后，才会继续创建发布任务。</small></p>
+                <p><strong id="submitStatusTitle">等待选择完整资料</strong><small id="submitStatusText">整个文件夹全部上传并校验成功后，才会继续发布商品。</small></p>
                 <div class="upload-progress" id="uploadProgress" hidden>
                   <div class="progress-track"><span id="uploadProgressBar" style="width:0%"></span></div>
                   <small id="uploadProgressText">0 / 0</small>
                 </div>
               </div>
               <div class="submit-actions">
-                <button class="btn primary" id="publishBtn"><i data-lucide="send"></i>创建发布任务</button>
+                <button class="btn primary" id="publishBtn"><i data-lucide="send"></i>发布商品</button>
               </div>
             </section>
           </section>
 
-          <section class="view" id="view-drafts">
-            <div class="list-header"><div><h2>商品草稿</h2><p>未提交或需要补充资料的商品。</p></div><button class="btn primary" data-view-link="publish"><i data-lucide="plus"></i>新建发布</button></div>
-            <div class="summary-grid">
-              <div class="metric"><span>全部草稿</span><strong>12</strong><small>最近 30 天</small></div>
-              <div class="metric"><span>待补图片</span><strong>4</strong><small>需要处理</small></div>
-              <div class="metric"><span>待补属性</span><strong>3</strong><small>类目必填项</small></div>
-              <div class="metric"><span>可以发布</span><strong>5</strong><small>检查已通过</small></div>
-            </div>
-            <div class="simple-list" id="draftList"></div>
-          </section>
-
-          <section class="view" id="view-tasks">
-            <div class="list-header"><div><h2>发布任务</h2><p>查看每批商品的上传和发布结果。</p></div><button class="btn secondary" id="refreshTasks"><i data-lucide="refresh-cw"></i>刷新状态</button></div>
-            <div class="summary-grid">
-              <div class="metric"><span>本次任务</span><strong id="todayTaskCount">0</strong><small>当前浏览器会话</small></div>
-              <div class="metric"><span>上传中</span><strong id="processingCount">0</strong><small>保持网页打开</small></div>
-              <div class="metric"><span>全部完成</span><strong>0</strong><small>图片已完整核验</small></div>
-              <div class="metric alert"><span>需要处理</span><strong>0</strong><small>失败项可再次重试</small></div>
-            </div>
-            <div class="task-list" id="taskList"></div>
-          </section>
-
-          <section class="view" id="view-templates">
-            <div class="list-header"><div><h2>模板中心</h2><p>复用类目、标题、描述、SKU、价格和库存规则。</p></div><button class="btn primary" id="newTemplateBtn"><i data-lucide="plus"></i>新建模板</button></div>
-            <div class="template-tabs"><button class="active">产品模板</button><button>SKU 模板</button><button>图片规则</button><button>标题规则</button><button>描述模块</button></div>
-            <div class="template-table-wrap">
-              <table class="data-table">
-                <thead><tr><th>模板名称</th><th>适用类目</th><th>SKU 规则</th><th>店铺范围</th><th>最近修改</th><th></th></tr></thead>
-                <tbody>
-                  <tr><td><strong>冰箱贴 · 单规格</strong><small>默认模板</small></td><td>家居装饰 / 冰箱贴</td><td>货号-01</td><td>全部店铺</td><td>今天 09:42</td><td><button class="icon-btn row-action" title="更多操作"><i data-lucide="ellipsis"></i></button></td></tr>
-                  <tr><td><strong>吧唧 · 多尺寸</strong><small>3 个规格</small></td><td>饰品配件 / 徽章</td><td>货号-尺寸</td><td>北美店铺</td><td>昨天 16:28</td><td><button class="icon-btn row-action" title="更多操作"><i data-lucide="ellipsis"></i></button></td></tr>
-                  <tr><td><strong>欧洲通用模板</strong><small>含多语言标题</small></td><td>家居装饰</td><td>货号-颜色</td><td>欧洲店铺</td><td>9 月 28 日</td><td><button class="icon-btn row-action" title="更多操作"><i data-lucide="ellipsis"></i></button></td></tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="view" id="view-settings">
-            <div class="list-header"><div><h2>接入设置</h2><p>连接图片存储、妙手开放平台或 TEMU 官方开放平台。</p></div><span class="settings-badge">配置仅保存在当前浏览器</span></div>
-            <div class="integration-section">
-              <div class="integration-head">
-                <span class="integration-icon cloud"><i data-lucide="cloud-upload"></i></span>
-                <div><h3>腾讯云 COS</h3><p>本地图片上传后生成可供平台读取的 HTTPS 地址。</p></div>
-                <span class="tag success" id="cosStatus">已接入</span>
-              </div>
-              <div class="form-grid">
-                <div class="field"><label>地域 Region</label><input placeholder="例如：ap-guangzhou" /></div>
-                <div class="field"><label>存储桶 Bucket</label><input placeholder="例如：product-images-123456" /></div>
-                <div class="field"><label>访问域名</label><input placeholder="https://images.example.com" /></div>
-                <div class="field"><label>图片目录前缀</label><input value="temu-products/" /></div>
-              </div>
-              <div class="secret-note"><i data-lucide="shield-check"></i><span>正式接入时由后端签发临时上传凭证，前端不保存 SecretKey。</span><button class="btn secondary placeholder-action" data-action="cos">测试连接</button></div>
-            </div>
-
-            <div class="integration-section">
-              <div class="integration-head">
-                <span class="integration-icon"><i data-lucide="blocks"></i></span>
-                <div><h3>妙手开放平台</h3><p>同步已授权店铺、仓库、运费模板并创建发布任务。</p></div>
-                <span class="tag success" id="miaoshouStatus">已配置</span>
-              </div>
-              <div class="form-grid">
-                <div class="field"><label>接口地址</label><input value="由后端配置" disabled /></div>
-                <div class="field"><label>App ID</label><input value="后端环境变量 MIAOSHOU_APP_ID" disabled /></div>
-                <div class="field"><label>App Secret</label><input type="password" value="由后端密钥管理保存" disabled /></div>
-                <div class="field span-2"><label>连接状态</label><button class="select-like" id="testMiaoshou"><span>检查妙手接口与店铺</span><i data-lucide="refresh-cw"></i></button></div>
-              </div>
-            </div>
-
-            <div class="integration-section">
-              <div class="integration-head">
-                <span class="integration-icon temu"><i data-lucide="store"></i></span>
-                <div><h3>TEMU 官方开放平台</h3><p>卖家授权应用后，直接调用官方商品与图片接口。</p></div>
-                <span class="tag pending">待申请</span>
-              </div>
-              <div class="form-grid">
-                <div class="field"><label>区域</label><select><option>Global</option><option>North America</option><option>Europe</option></select></div>
-                <div class="field"><label>App Key</label><input placeholder="开放平台创建应用后获得" /></div>
-                <div class="field"><label>回调地址</label><input value="待后端域名确定后生成" disabled /></div>
-                <div class="field"><label>卖家授权</label><button class="select-like placeholder-action" data-action="temu"><span>尚未获得 Access Token</span><i data-lucide="external-link"></i></button></div>
-              </div>
-              <div class="secret-note"><i data-lucide="key-round"></i><span>Access Token、Refresh Token 和签名密钥必须只保存在后端。</span><button class="btn secondary placeholder-action" data-action="temu">开始接入</button></div>
-            </div>
-          </section>
         </div>
       </main>
     </div>
