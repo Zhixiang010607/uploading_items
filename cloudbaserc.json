@@ -1,0 +1,25 @@
+{
+  "$schema": "https://static.cloudbase.net/cli/cloudbaserc.schema.json",
+  "version": "2.0",
+  "envId": "yanyujie-upload-item-d1ab8962386",
+  "functionRoot": "functions",
+  "functions": [
+    {
+      "name": "temu-api",
+      "type": "HTTP",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
+      "timeout": 900,
+      "memorySize": 512,
+      "description": "TEMU商品发布助手后端：图片清单、云存储、妙手接口",
+      "installDependency": true,
+      "envVariables": {
+        "CLOUDBASE_APIKEY": "{{env.CLOUDBASE_APIKEY}}",
+        "MIAOSHOU_APP_ID": "{{env.MIAOSHOU_APP_ID}}",
+        "MIAOSHOU_APP_SECRET": "{{env.MIAOSHOU_APP_SECRET}}",
+        "TCB_ENV_ID": "yanyujie-upload-item-d1ab8962386",
+        "IMAGE_BUCKET": "temu-product-images"
+      }
+    }
+  ]
+}

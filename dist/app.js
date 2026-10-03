@@ -1,66 +1,121 @@
-let products = [
-  { id: "EXCEL-001", group: 1, title: "复古旅行城市纪念冰箱贴装饰", status: "通过" },
-  { id: "EXCEL-002", group: 2, title: "可爱动物立体树脂冰箱贴礼物", status: "通过" },
-  { id: "EXCEL-003", group: 3, title: "海滨风景手绘纪念磁贴家居装饰", status: "通过" },
-  { id: "EXCEL-004", group: 4, title: "世界地标系列立体冰箱贴收藏", status: "通过" },
-  { id: "EXCEL-005", group: 5, title: "节日礼物磁性留言贴厨房装饰", status: "通过" }
-];
+const APP_CONFIG = window.TEMU_APP_CONFIG;
+const cloudApp = window.cloudbase?.init({
+  env: APP_CONFIG.envId,
+  accessKey: APP_CONFIG.publishableKey
+});
+const imageBucket = cloudApp?.storage.from(APP_CONFIG.bucket);
 
-const drafts = [
-  { title: "秋季新品 · 冰箱贴 24 款", meta: "36 个商品 · 北美店铺", issue: "4 个商品缺少图片", tag: "待补图片" },
-  { title: "城市旅行纪念系列", meta: "18 个商品 · 欧洲店铺", issue: "3 个类目属性待填写", tag: "待补属性" },
-  { title: "万圣节主题磁贴", meta: "42 个商品 · 北美店铺", issue: "检查已通过，可创建任务", tag: "可以发布" }
-];
-
-const tasks = [
-  { id: "TASK-20261003-003", name: "冰箱贴 · 北美店铺", count: 60, status: "发布中", progress: 68, time: "今天 14:26", detail: "已完成 41 / 60" },
-  { id: "TASK-20261003-002", name: "城市纪念系列 · 欧洲店铺", count: 84, status: "部分失败", progress: 87, time: "今天 11:08", detail: "成功 73 · 失败 11" },
-  { id: "TASK-20261003-001", name: "动物系列 · 北美店铺", count: 42, status: "已完成", progress: 100, time: "今天 09:15", detail: "成功 42 / 42" }
-];
+const tasks = [];
+let products = [];
+let selected = new Set();
+let imageFilesBySlot = new Map();
+let publishRunning = false;
+let erpReady = false;
+let activeBatchId = localStorage.getItem("temu-active-batch") || "";
+let importState = emptyImportState();
 
 const pageMeta = {
-  publish: ["发布商品", "整理本地商品资料并创建发布任务"],
-  drafts: ["商品草稿", "继续处理未完成的商品资料"],
-  tasks: ["发布任务", "查看批次进度和失败原因"],
-  templates: ["模板中心", "统一商品、SKU 和图片处理规则"],
-  settings: ["接入设置", "配置图片存储与发布平台"]
+  publish: ["发布商品", "读取本地资料并创建发布任务"],
+  drafts: ["商品草稿", "当前流程不保存草稿"],
+  tasks: ["发布任务", "查看本次浏览器会话中的任务进度"],
+  templates: ["模板中心", "模板来自妙手 ERP"],
+  settings: ["接入设置", "检查腾讯云与妙手开放平台连接"]
 };
 
-let selected = new Set(products.map((item) => item.id));
-let importState = {
-  titleCount: products.length,
-  groupCount: products.length,
-  completeGroups: products.length,
-  invalidFiles: [],
-  missingImages: [],
-  duplicateImages: [],
-  imageCount: products.length * 6,
-  imageInspected: false,
-  errors: [],
-  valid: true
-};
+function emptyImportState() {
+  return {
+    titleCount: 0,
+    groupCount: 0,
+    completeGroups: 0,
+    invalidFiles: [],
+    nestedFiles: [],
+    missingImages: [],
+    duplicateImages: [],
+    imageCount: 0,
+    imageInspected: false,
+    errors: [],
+    valid: false
+  };
+}
 
 function iconRefresh() {
   if (window.lucide) window.lucide.createIcons();
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>'"]/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
+  })[char]);
+}
+
+function getSelectedLabel(selector, fallback = "尚未选择") {
+  const select = document.querySelector(selector);
+  return select?.selectedOptions?.[0]?.textContent || fallback;
+}
+
+function getSelectedValue(selector) {
+  return document.querySelector(selector)?.value || "";
+}
+
+function showToast(title, message, type = "warning") {
+  const toast = document.createElement("div");
+  toast.className = `toast ${type === "success" ? "" : "warning"}`;
+  toast.innerHTML = `<i data-lucide="${type === "success" ? "circle-check" : "info"}"></i><div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span></div>`;
+  document.querySelector("#toastRegion").appendChild(toast);
+  iconRefresh();
+  window.setTimeout(() => toast.remove(), 5200);
+}
+
+function setSubmitStatus(title, message, current = null, total = null, state = "warning") {
+  document.querySelector("#submitStatusTitle").textContent = title;
+  document.querySelector("#submitStatusText").textContent = message;
+  document.querySelector("#submitStatusDot").className = `status-dot ${state}`;
+  const progress = document.querySelector("#uploadProgress");
+  if (current === null || total === null) {
+    progress.hidden = true;
+    return;
+  }
+  progress.hidden = false;
+  const percent = total ? Math.min(100, Math.round((current / total) * 100)) : 0;
+  document.querySelector("#uploadProgressBar").style.width = `${percent}%`;
+  document.querySelector("#uploadProgressText").textContent = `${current} / ${total}`;
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(`${APP_CONFIG.apiBase}${path}`, {
+    method: options.method || "GET",
+    headers: options.body === undefined ? {} : { "content-type": "application/json" },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+  });
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(`云端接口返回了无法识别的内容（HTTP ${response.status}）`);
+  }
+  if (!response.ok || data?.ok === false) {
+    const code = data?.details?.code ? `（${data.details.code}）` : "";
+    throw new Error(`${data?.message || `请求失败：HTTP ${response.status}`}${code}`);
+  }
+  return data;
 }
 
 function renderProducts(query = "") {
   const rows = document.querySelector("#productRows");
   const normalized = query.trim().toLowerCase();
   const visible = products.filter((item) => `${item.id} ${item.title}`.toLowerCase().includes(normalized));
-  const skuTemplate = getSelectedLabel("#skuTemplateSelect", "冰箱贴单规格 SKU 模板");
+  const skuTemplate = escapeHtml(getSelectedLabel("#skuTemplateSelect"));
   rows.innerHTML = visible.map((item) => {
     const statusClass = item.status === "通过" ? "success" : "error";
-    return `
-      <tr>
-        <td class="check-cell"><input class="product-check" type="checkbox" data-id="${item.id}" ${selected.has(item.id) ? "checked" : ""} aria-label="选择 ${item.id}" /></td>
-        <td><div class="product-cell"><span class="thumb-number">${item.group}</span><span class="product-copy"><strong>${item.title}</strong><small>Excel 第 ${item.group} 个产品标题</small></span></div></td>
-        <td><div class="image-sequence"><code>${item.group}.1</code><span>至</span><code>${item.group}.6</code><span>6 张</span></div></td>
-        <td><div class="image-sequence"><span class="thumb-number">${item.group}.1</span><span>轮播图第一张</span></div></td>
-        <td>${skuTemplate}</td>
-        <td><span class="tag ${statusClass}">${item.status}</span></td>
-        <td><button class="icon-btn row-action edit-product" data-id="${item.id}" title="查看匹配详情" aria-label="查看 ${item.id}"><i data-lucide="eye"></i></button></td>
-      </tr>`;
+    return `<tr>
+      <td class="check-cell"><input class="product-check" type="checkbox" data-id="${item.id}" ${selected.has(item.id) ? "checked" : ""} aria-label="选择 ${item.id}" /></td>
+      <td><div class="product-cell"><span class="thumb-number">${item.group}</span><span class="product-copy"><strong>${escapeHtml(item.title)}</strong><small>Excel 第 ${item.group} 个产品标题</small></span></div></td>
+      <td><div class="image-sequence"><code>${item.group}.1</code><span>至</span><code>${item.group}.6</code><span>6 张</span></div></td>
+      <td><div class="image-sequence"><span class="thumb-number">${item.group}.1</span><span>轮播图第一张</span></div></td>
+      <td>${skuTemplate}</td>
+      <td><span class="tag ${statusClass}">${item.status}</span></td>
+      <td><button class="icon-btn row-action edit-product" data-id="${item.id}" title="查看匹配详情" aria-label="查看 ${item.id}"><i data-lucide="eye"></i></button></td>
+    </tr>`;
   }).join("");
   bindProductRows();
   updateSelectedCount();
@@ -80,38 +135,24 @@ function bindProductRows() {
 }
 
 function updateSelectedCount() {
-  document.querySelector("#selectedCount").textContent = selected.size;
+  const count = document.querySelector("#selectedCount");
+  if (count) count.textContent = selected.size;
   const checks = [...document.querySelectorAll(".product-check")];
   document.querySelector("#selectAll").checked = checks.length > 0 && checks.every((input) => input.checked);
 }
 
-function getSelectedLabel(selector, fallback = "") {
-  const select = document.querySelector(selector);
-  return select?.selectedOptions?.[0]?.textContent || fallback;
-}
-
-function updateMatchSummary() {
-  const summary = document.querySelector("#matchSummary");
-  if (!importState.imageInspected) {
-    summary.innerHTML = `<span id="selectedCount">${selected.size}</span> 个产品：${importState.titleCount} 个 Excel 标题；选择图片文件夹后自动检查。`;
-    return;
-  }
-  const statusText = importState.valid
-    ? "数量一致，每组均为 6 张，预览图取每组第一张。"
-    : importState.errors[0];
-  summary.innerHTML = `<span id="selectedCount">${selected.size}</span> 个产品：${importState.titleCount} 个 Excel 标题，${importState.groupCount} 组轮播图。${statusText}`;
-}
-
 function refreshImportValidation() {
   const errors = [];
-  if (importState.invalidFiles.length) errors.push(`命名错误：${importState.invalidFiles.slice(0, 6).join("、")}`);
+  if (!importState.titleCount) errors.push("尚未读取 Excel 产品标题");
+  if (importState.nestedFiles.length) errors.push(`文件夹内不能再有子文件夹：${importState.nestedFiles.slice(0, 4).join("、")}`);
+  if (importState.invalidFiles.length) errors.push(`文件名或格式错误：${importState.invalidFiles.slice(0, 6).join("、")}`);
   if (importState.duplicateImages.length) errors.push(`编号重复：${importState.duplicateImages.slice(0, 6).join("、")}`);
   if (importState.missingImages.length) errors.push(`缺少图片：${importState.missingImages.slice(0, 8).join("、")}`);
   if (importState.imageInspected && importState.titleCount !== importState.groupCount) {
     errors.push(`数量不一致：Excel 有 ${importState.titleCount} 个标题，图片有 ${importState.groupCount} 组`);
   }
   importState.errors = errors;
-  importState.valid = importState.imageInspected ? errors.length === 0 : true;
+  importState.valid = importState.imageInspected && errors.length === 0 && importState.imageCount === importState.titleCount * 6;
 
   if (importState.imageInspected) {
     const dropZone = document.querySelector("#imageDrop");
@@ -123,38 +164,406 @@ function refreshImportValidation() {
       : `检查失败：${errors.join("；")}`;
     output.title = output.textContent;
   }
-  updateMatchSummary();
+  const summary = document.querySelector("#matchSummary");
+  if (summary) {
+    const detail = importState.imageInspected
+      ? `${importState.groupCount} 组轮播图。${importState.valid ? "全部编号完整。" : errors[0] || "等待检查。"}`
+      : "选择图片文件夹后自动检查。";
+    summary.innerHTML = `<span id="selectedCount">${selected.size}</span> 个产品：${importState.titleCount} 个 Excel 标题；${escapeHtml(detail)}`;
+  }
+  if (!publishRunning) {
+    setSubmitStatus(
+      importState.valid ? "本地资料检查通过" : "等待选择完整资料",
+      importState.valid ? "创建任务时会先上传全部图片，再由云端逐张复核。" : (errors[0] || "请选择 Excel 和完整图片文件夹。"),
+      null,
+      null,
+      importState.valid ? "success" : "warning"
+    );
+  }
 }
 
-function renderDrafts() {
-  document.querySelector("#draftList").innerHTML = drafts.map((draft) => `
-    <div class="list-row">
-      <div><h3>${draft.title}</h3><p>${draft.meta}</p></div>
-      <div><small>${draft.issue}</small></div>
-      <div><span class="tag ${draft.tag === "可以发布" ? "success" : "pending"}">${draft.tag}</span></div>
-      <button class="btn secondary draft-open">继续编辑</button>
-    </div>`).join("");
-  document.querySelectorAll(".draft-open").forEach((button) => button.addEventListener("click", () => {
-    switchView("publish");
-    showToast("已打开草稿", "演示数据已载入商品检查列表。", "success");
+function readTitlesFromRows(rows) {
+  if (!rows.length) return [];
+  const titleNames = ["产品标题", "商品标题", "标题", "product title", "title"];
+  const headers = rows[0].map((item) => String(item ?? "").trim().toLowerCase());
+  const titleIndex = headers.findIndex((header) => titleNames.includes(header));
+  const columnIndex = titleIndex >= 0 ? titleIndex : 0;
+  return rows.slice(1).map((row) => String(row[columnIndex] ?? "").trim()).filter(Boolean);
+}
+
+function applyTitles(titles, fileName) {
+  if (!titles.length) throw new Error("表格中没有读到产品标题，请确认第一列或标题列有数据");
+  products = titles.map((title, index) => ({
+    id: `EXCEL-${String(index + 1).padStart(4, "0")}`,
+    group: index + 1,
+    title,
+    status: imageFilesBySlot.has(`${index + 1}.1`) ? "通过" : "等待图片"
   }));
+  selected = new Set(products.map((item) => item.id));
+  importState.titleCount = products.length;
+  document.querySelector("#sheetFileName").textContent = `${fileName} · ${products.length} 个标题`;
+  renderProducts();
+  refreshImportValidation();
+  showToast("产品标题已读取", `${products.length} 个标题将依次匹配 1.1–1.6、2.1–2.6。`, "success");
+}
+
+async function handleSheetFile(file) {
+  try {
+    if (!window.XLSX) throw new Error("Excel 读取组件加载失败，请刷新网页后重试");
+    const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = window.XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" });
+    applyTitles(readTitlesFromRows(rows), file.name);
+  } catch (error) {
+    document.querySelector("#sheetFileName").textContent = `读取失败：${error.message}`;
+    showToast("表格读取失败", error.message, "warning");
+  }
+}
+
+function inspectImageFolder(fileList) {
+  const files = [...fileList];
+  const groups = new Map();
+  const invalidFiles = [];
+  const nestedFiles = [];
+  const duplicateImages = [];
+  const nextFilesBySlot = new Map();
+
+  files.forEach((file) => {
+    const pathParts = (file.webkitRelativePath || file.name).split("/").filter(Boolean);
+    if (pathParts.length > 2) nestedFiles.push(file.webkitRelativePath);
+    const match = file.name.match(/^(\d+)\.([1-6])\.(jpe?g|png|webp)$/i);
+    if (!match) {
+      invalidFiles.push(file.name);
+      return;
+    }
+    const group = Number(match[1]);
+    const position = Number(match[2]);
+    if (group < 1 || String(group) !== match[1]) {
+      invalidFiles.push(file.name);
+      return;
+    }
+    const slot = `${group}.${position}`;
+    if (nextFilesBySlot.has(slot)) duplicateImages.push(slot);
+    nextFilesBySlot.set(slot, file);
+    if (!groups.has(group)) groups.set(group, new Set());
+    groups.get(group).add(position);
+  });
+
+  const highestGroup = groups.size ? Math.max(...groups.keys()) : 0;
+  const missingImages = [];
+  let completeGroups = 0;
+  for (let group = 1; group <= highestGroup; group += 1) {
+    const positions = groups.get(group);
+    for (let position = 1; position <= 6; position += 1) {
+      if (!positions?.has(position)) missingImages.push(`${group}.${position}`);
+    }
+    if (positions?.size === 6) completeGroups += 1;
+  }
+
+  imageFilesBySlot = nextFilesBySlot;
+  Object.assign(importState, {
+    groupCount: highestGroup,
+    completeGroups,
+    invalidFiles,
+    nestedFiles,
+    missingImages,
+    duplicateImages,
+    imageCount: files.length,
+    imageInspected: true
+  });
+  products.forEach((product) => {
+    product.status = groups.get(product.group)?.size === 6 ? "通过" : "图片不完整";
+  });
+  renderProducts();
+  refreshImportValidation();
+  showToast(
+    importState.valid ? "图片编号检查通过" : "图片编号需要修正",
+    importState.valid ? `${highestGroup} 组，共 ${files.length} 张图片。` : importState.errors.join("；"),
+    importState.valid ? "success" : "warning"
+  );
+}
+
+async function sha256Blob(blob) {
+  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function sha256Text(value) {
+  return sha256Blob(new Blob([value], { type: "text/plain" }));
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const output = new Array(items.length);
+  let cursor = 0;
+  async function run() {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      output[index] = await worker(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run));
+  return output;
+}
+
+function extensionFor(file) {
+  const extension = file.name.split(".").pop().toLowerCase();
+  return extension === "jpeg" ? "jpg" : extension;
+}
+
+function mimeFor(file) {
+  const extension = extensionFor(file);
+  return extension === "jpg" ? "image/jpeg" : `image/${extension}`;
+}
+
+async function buildManifest() {
+  const slots = [...imageFilesBySlot.entries()].sort((a, b) => {
+    const [ag, ap] = a[0].split(".").map(Number);
+    const [bg, bp] = b[0].split(".").map(Number);
+    return ag - bg || ap - bp;
+  });
+  let hashed = 0;
+  setSubmitStatus("正在核对文件内容", "为每张图片计算 SHA-256，确保上传前后完全一致。", 0, slots.length, "warning");
+  const items = await mapWithConcurrency(slots, 2, async ([slot, file]) => {
+    const [productIndex, imagePosition] = slot.split(".").map(Number);
+    const sha256 = await sha256Blob(file);
+    hashed += 1;
+    setSubmitStatus("正在核对文件内容", `已完成 ${hashed} 张图片的内容校验。`, hashed, slots.length, "warning");
+    return {
+      productIndex,
+      imagePosition,
+      originalName: file.name,
+      sizeBytes: file.size,
+      mimeType: mimeFor(file),
+      extension: extensionFor(file),
+      sha256
+    };
+  });
+  const manifestSource = JSON.stringify({
+    products: products.map((item) => item.title),
+    storeId: getSelectedValue("#storeSelect"),
+    productTemplateId: getSelectedValue("#productTemplateSelect"),
+    skuTemplateId: getSelectedValue("#skuTemplateSelect"),
+    items
+  });
+  return { items, manifestHash: await sha256Text(manifestSource) };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function uploadOne(serverItem, manifestItem) {
+  const slot = `${manifestItem.productIndex}.${manifestItem.imagePosition}`;
+  const file = imageFilesBySlot.get(slot);
+  let lastError;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      const result = await imageBucket.upload(serverItem.object_key, file, {
+        upsert: true,
+        contentType: manifestItem.mimeType,
+        metadata: {
+          sha256: manifestItem.sha256,
+          productIndex: String(manifestItem.productIndex),
+          imagePosition: String(manifestItem.imagePosition),
+          originalName: manifestItem.originalName
+        }
+      });
+      if (result?.error) throw new Error(result.error.message || "腾讯云存储返回错误");
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 5) await sleep(600 * (2 ** (attempt - 1)) + Math.random() * 300);
+    }
+  }
+  throw new Error(`${slot} 上传失败：${lastError?.message || "未知错误"}`);
+}
+
+async function uploadAndVerify(batchId, manifestItems) {
+  let verified = await api(`/batches/${batchId}/finalize`, { method: "POST", body: {} });
+  for (let round = 1; round <= 5 && !verified.complete; round += 1) {
+    const status = await api(`/batches/${batchId}`);
+    const pending = status.items.filter((item) => item.storage_status !== "uploaded");
+    const manifestBySlot = new Map(manifestItems.map((item) => [`${item.productIndex}.${item.imagePosition}`, item]));
+    let done = manifestItems.length - pending.length;
+    setSubmitStatus("正在上传全部图片", `第 ${round} 轮：仅重试尚未通过云端核验的图片。`, done, manifestItems.length, "warning");
+    await mapWithConcurrency(pending, 4, async (item) => {
+      const slot = `${item.product_index}.${item.image_position}`;
+      await uploadOne(item, manifestBySlot.get(slot));
+      done += 1;
+      setSubmitStatus("正在上传全部图片", "上传中，请保持网页打开。", done, manifestItems.length, "warning");
+    });
+    verified = await api(`/batches/${batchId}/finalize`, { method: "POST", body: {} });
+  }
+  if (!verified.complete || verified.matched_count !== verified.expected_count) {
+    throw new Error(`云端核验未通过：应有 ${verified.expected_count} 张，完整匹配 ${verified.matched_count} 张`);
+  }
+  return verified;
+}
+
+async function importAllImages(batchId, total) {
+  let status = await api(`/batches/${batchId}`);
+  let pending = status.items.filter((item) => item.erp_status !== "imported");
+  for (let round = 1; round <= 5 && pending.length; round += 1) {
+    for (let offset = 0; offset < pending.length; offset += 24) {
+      const chunk = pending.slice(offset, offset + 24).map((item) => ({
+        productIndex: item.product_index,
+        imagePosition: item.image_position
+      }));
+      const result = await api(`/batches/${batchId}/import`, { method: "POST", body: { slots: chunk } });
+      setSubmitStatus("正在导入妙手图片空间", "腾讯云图片已全部验证，现在写入 ERP。", result.importedCount, total, "warning");
+      const allFailed = result.items.length && result.items.every((item) => item.status === "failed");
+      if (allFailed) throw new Error(result.items[0].message || "妙手图片导入失败");
+    }
+    status = await api(`/batches/${batchId}`);
+    pending = status.items.filter((item) => item.erp_status !== "imported");
+  }
+  if (pending.length) throw new Error(`仍有 ${pending.length} 张图片未成功导入妙手，任务已保留，可再次重试`);
+}
+
+async function runPublishFlow() {
+  if (publishRunning) return;
+  if (!importState.valid) return showToast("资料检查未通过", importState.errors[0] || "请选择完整资料", "warning");
+  if (selected.size !== products.length) return showToast("必须提交全部产品", "为保证文件夹不多不少，请保持全部产品选中。", "warning");
+  if (!erpReady) return showToast("妙手应用尚不可用", "请先在妙手开放平台启用或审核应用，再点击接入设置中的连接检查。", "warning");
+  if (!["#storeSelect", "#productTemplateSelect", "#skuTemplateSelect"].every((selector) => getSelectedValue(selector))) {
+    return showToast("店铺或模板未选择", "请选择目标店铺、产品模板和 SKU 模板。", "warning");
+  }
+  if (!imageBucket) return showToast("腾讯云组件未连接", "请刷新网页后重试。", "warning");
+
+  publishRunning = true;
+  const button = document.querySelector("#publishBtn");
+  button.disabled = true;
+  try {
+    const { items, manifestHash } = await buildManifest();
+    const requestedId = `batch-${crypto.randomUUID()}`;
+    const batch = await api("/batches", {
+      method: "POST",
+      body: {
+        id: requestedId,
+        manifestHash,
+        products: products.map((item) => ({ title: item.title })),
+        items,
+        storeId: getSelectedValue("#storeSelect"),
+        productTemplateId: getSelectedValue("#productTemplateSelect"),
+        skuTemplateId: getSelectedValue("#skuTemplateSelect")
+      }
+    });
+    activeBatchId = batch.id;
+    localStorage.setItem("temu-active-batch", activeBatchId);
+    const verified = await uploadAndVerify(activeBatchId, items);
+    setSubmitStatus("云端图片全部核验成功", `${verified.expected_count} 张图片不多、不少，编号和内容均一致。`, verified.expected_count, verified.expected_count, "success");
+    await importAllImages(activeBatchId, items.length);
+    tasks.unshift({
+      id: activeBatchId,
+      name: `${getSelectedLabel("#storeSelect")} · ${getSelectedLabel("#productTemplateSelect")}`,
+      count: products.length,
+      status: "图片已就绪",
+      progress: 100,
+      time: "刚刚",
+      detail: `${items.length} 张图片全部上传并导入`
+    });
+    renderTasks();
+    setSubmitStatus("全部图片已上传并导入", "图片已完整进入妙手；商品发布接口需在应用权限启用后继续。", items.length, items.length, "success");
+    showToast("整批图片处理完成", `${items.length} 张图片全部上传、校验并导入成功。`, "success");
+  } catch (error) {
+    setSubmitStatus("任务已暂停", error.message, null, null, "error");
+    showToast("创建任务未完成", error.message, "warning");
+  } finally {
+    publishRunning = false;
+    button.disabled = false;
+  }
+}
+
+function findRecordArray(value, depth = 0) {
+  if (depth > 6 || value == null) return [];
+  if (Array.isArray(value)) return value.length && value.every((item) => typeof item === "object") ? value : [];
+  if (typeof value !== "object") return [];
+  for (const key of ["records", "rows", "list", "items", "data", "result"]) {
+    if (key in value) {
+      const found = findRecordArray(value[key], depth + 1);
+      if (found.length) return found;
+    }
+  }
+  for (const nested of Object.values(value)) {
+    const found = findRecordArray(nested, depth + 1);
+    if (found.length) return found;
+  }
+  return [];
+}
+
+function recordValue(record, keys) {
+  for (const key of keys) if (record?.[key] !== undefined && record[key] !== null) return String(record[key]);
+  return "";
+}
+
+function fillSelect(selector, records, kind) {
+  const select = document.querySelector(selector);
+  const idKeys = kind === "shop" ? ["shopId", "shop_id", "id"] : ["detailId", "collectBoxDetailId", "templateId", "id"];
+  const nameKeys = kind === "shop" ? ["shopName", "shop_name", "name", "mallName"] : ["title", "productTitle", "goodsName", "templateName", "name"];
+  const options = records.map((record, index) => {
+    const value = recordValue(record, idKeys);
+    const label = recordValue(record, nameKeys) || `${kind === "shop" ? "店铺" : "模板"} ${index + 1}`;
+    return value ? `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>` : "";
+  }).filter(Boolean);
+  select.innerHTML = options.length ? `<option value="">请选择</option>${options.join("")}` : '<option value="">没有可用数据</option>';
+  select.disabled = !options.length;
+  return options.length;
+}
+
+async function syncERP(showResult = false) {
+  const sourceState = document.querySelector("#channel .section-state");
+  ["#storeSelect", "#productTemplateSelect", "#skuTemplateSelect"].forEach((selector) => {
+    const select = document.querySelector(selector);
+    select.innerHTML = '<option value="">正在读取 ERP…</option>';
+    select.disabled = true;
+  });
+  try {
+    await api("/health");
+    const shopsResponse = await api("/erp/read", { method: "POST", body: { resource: "shops", params: { pageNum: 1, pageSize: 200 } } });
+    const shops = findRecordArray(shopsResponse);
+    if (!fillSelect("#storeSelect", shops, "shop")) throw new Error("妙手接口已连接，但没有读取到已绑定店铺");
+    const templatesResponse = await api("/erp/read", { method: "POST", body: { resource: "productTemplates", params: { pageNum: 1, pageSize: 200 } } });
+    const templates = findRecordArray(templatesResponse);
+    if (!fillSelect("#productTemplateSelect", templates, "template")) throw new Error("没有读取到可用产品模板");
+    fillSelect("#skuTemplateSelect", templates, "template");
+    erpReady = true;
+    sourceState.innerHTML = '<i data-lucide="circle-check"></i>ERP 数据已同步';
+    sourceState.classList.add("connected");
+    document.querySelector(".sidebar-foot .connection-line strong").textContent = "云端已连接";
+    document.querySelector(".sidebar-foot .connection-line span:last-child").textContent = "腾讯云与妙手可用";
+    if (showResult) showToast("妙手连接正常", `已读取 ${shops.length} 个店铺和 ${templates.length} 个模板。`, "success");
+  } catch (error) {
+    erpReady = false;
+    ["#storeSelect", "#productTemplateSelect", "#skuTemplateSelect"].forEach((selector) => {
+      const select = document.querySelector(selector);
+      select.innerHTML = '<option value="">妙手应用不可用</option>';
+      select.disabled = true;
+    });
+    sourceState.innerHTML = '<i data-lucide="circle-alert"></i>ERP 连接失败';
+    sourceState.title = error.message;
+    document.querySelector(".sidebar-foot .connection-line strong").textContent = "腾讯云已连接";
+    document.querySelector(".sidebar-foot .connection-line span:last-child").textContent = `妙手：${error.message}`;
+    if (showResult) showToast("妙手连接失败", error.message, "warning");
+  }
+  iconRefresh();
 }
 
 function renderTasks() {
-  document.querySelector("#taskList").innerHTML = tasks.map((task) => {
-    const tagClass = task.status === "已完成" ? "success" : task.status === "部分失败" ? "error" : "info";
-    return `
-      <div class="list-row task-row">
-        <div><h3>${task.name}</h3><p>${task.id} · ${task.count} 个商品</p></div>
-        <div><div class="progress-track"><span style="width:${task.progress}%"></span></div><small>${task.detail}</small></div>
-        <div class="task-meta"><span><i data-lucide="clock-3"></i>${task.time}</span><span class="tag ${tagClass}">${task.status}</span></div>
-        <div class="task-actions">${task.status === "部分失败" ? '<button class="btn secondary retry-task"><i data-lucide="rotate-ccw"></i>重试失败项</button>' : '<button class="icon-btn row-action" title="查看详情"><i data-lucide="eye"></i></button>'}</div>
-      </div>`;
-  }).join("");
-  document.querySelectorAll(".retry-task").forEach((button) => button.addEventListener("click", () => {
-    showToast("已加入重试队列", "演示模式：11 个失败商品已创建本地重试记录。", "success");
-  }));
+  const list = document.querySelector("#taskList");
+  list.innerHTML = tasks.length ? tasks.map((task) => `<div class="list-row task-row">
+    <div><h3>${escapeHtml(task.name)}</h3><p>${escapeHtml(task.id)} · ${task.count} 个商品</p></div>
+    <div><div class="progress-track"><span style="width:${task.progress}%"></span></div><small>${escapeHtml(task.detail)}</small></div>
+    <div class="task-meta"><span><i data-lucide="clock-3"></i>${task.time}</span><span class="tag success">${task.status}</span></div>
+    <div class="task-actions"><button class="icon-btn row-action" title="查看详情"><i data-lucide="eye"></i></button></div>
+  </div>`).join("") : '<div class="empty-state">本次会话还没有任务</div>';
+  document.querySelector("#todayTaskCount").textContent = tasks.length;
+  document.querySelector("#taskBadge").textContent = tasks.length;
   iconRefresh();
+}
+
+function renderDrafts() {
+  document.querySelector("#draftList").innerHTML = '<div class="empty-state">当前流程不保存草稿。资料完整后直接创建发布任务。</div>';
 }
 
 function switchView(viewName) {
@@ -167,27 +576,13 @@ function switchView(viewName) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function showToast(title, message, type = "warning") {
-  const toast = document.createElement("div");
-  toast.className = `toast ${type === "success" ? "" : "warning"}`;
-  toast.innerHTML = `<i data-lucide="${type === "success" ? "circle-check" : "info"}"></i><div><strong>${title}</strong><span>${message}</span></div>`;
-  document.querySelector("#toastRegion").appendChild(toast);
-  iconRefresh();
-  window.setTimeout(() => toast.remove(), 4200);
-}
-
-function openDialog(title, subtitle, body, onConfirm = null) {
+function openDialog(title, subtitle, body) {
   document.querySelector("#dialogTitle").textContent = title;
   document.querySelector("#dialogSubtitle").textContent = subtitle;
   document.querySelector("#dialogBody").innerHTML = body;
   const backdrop = document.querySelector("#dialogBackdrop");
   backdrop.classList.add("open");
   backdrop.setAttribute("aria-hidden", "false");
-  document.querySelector("#dialogConfirm").onclick = () => {
-    if (onConfirm) onConfirm();
-    closeDialog();
-  };
-  iconRefresh();
 }
 
 function closeDialog() {
@@ -198,113 +593,18 @@ function closeDialog() {
 
 function openProductDialog(id) {
   const product = products.find((item) => item.id === id);
-  openDialog("匹配详情", `${product.id} · Excel 标题与图片组`, `
-    <div class="dialog-form">
-      <div class="field span-2"><label>产品标题（来自 Excel）</label><input value="${product.title}" disabled /></div>
-      <div class="field"><label>轮播图片</label><input value="${product.group}.1 至 ${product.group}.6（共 6 张）" disabled /></div>
-      <div class="field"><label>预览图</label><input value="${product.group}.1" disabled /></div>
-      <div class="field span-2"><label>SKU 模板（来自 ERP）</label><input value="${getSelectedLabel("#skuTemplateSelect")}" disabled /></div>
-    </div>`);
+  if (!product) return;
+  openDialog("匹配详情", `${product.id} · Excel 标题与图片组`, `<div class="dialog-form">
+    <div class="field span-2"><label>产品标题</label><input value="${escapeHtml(product.title)}" disabled /></div>
+    <div class="field"><label>轮播图片</label><input value="${product.group}.1 至 ${product.group}.6" disabled /></div>
+    <div class="field"><label>预览图</label><input value="${product.group}.1" disabled /></div>
+    <div class="field span-2"><label>SKU 模板</label><input value="${escapeHtml(getSelectedLabel("#skuTemplateSelect"))}" disabled /></div>
+  </div>`);
 }
 
 function closeSidebar() {
   document.querySelector("#sidebar").classList.remove("open");
   document.querySelector("#mobileBackdrop").classList.remove("show");
-}
-
-function parseCsvLine(line) {
-  const cells = [];
-  let cell = "";
-  let quoted = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    if (char === '"' && line[index + 1] === '"' && quoted) {
-      cell += '"';
-      index += 1;
-    } else if (char === '"') {
-      quoted = !quoted;
-    } else if (char === "," && !quoted) {
-      cells.push(cell.trim());
-      cell = "";
-    } else {
-      cell += char;
-    }
-  }
-  cells.push(cell.trim());
-  return cells;
-}
-
-async function handleSheetFile(file) {
-  document.querySelector("#sheetFileName").textContent = file.name;
-  if (!file.name.toLowerCase().endsWith(".csv")) {
-    showToast("Excel 已选择", "正式后端接入后会读取产品标题并与轮播图组数核对。", "success");
-    return;
-  }
-
-  const lines = (await file.text()).split(/\r?\n/).filter((line) => line.trim());
-  if (lines.length < 2) return showToast("CSV 没有产品数据", "请确认第一行为表头，后续每行包含一个产品标题。", "warning");
-  const headers = parseCsvLine(lines[0]).map((item) => item.toLowerCase());
-  const titleNames = ["产品标题", "商品标题", "标题", "product title", "title"];
-  const titleIndex = headers.findIndex((header) => titleNames.includes(header));
-  const columnIndex = titleIndex >= 0 ? titleIndex : 0;
-  const titles = lines.slice(1).map((line) => parseCsvLine(line)[columnIndex]).filter(Boolean);
-  products = titles.map((title, index) => ({ id: `EXCEL-${String(index + 1).padStart(3, "0")}`, group: index + 1, title, status: "通过" }));
-  selected = new Set(products.map((item) => item.id));
-  importState.titleCount = products.length;
-  renderProducts();
-  refreshImportValidation();
-  showToast("产品标题已读取", `从 CSV 读取 ${products.length} 个标题，将依次匹配 1.1–1.6、2.1–2.6。`, "success");
-}
-
-function inspectImageFolder(files) {
-  const groups = new Map();
-  const invalidFiles = [];
-  const duplicateImages = [];
-  [...files].forEach((file) => {
-    const dotIndex = file.name.lastIndexOf(".");
-    const baseName = dotIndex > 0 ? file.name.slice(0, dotIndex) : file.name;
-    const match = baseName.match(/^(\d+)\.([1-6])$/);
-    if (!match) {
-      invalidFiles.push(file.name);
-      return;
-    }
-    const group = Number(match[1]);
-    const position = Number(match[2]);
-    if (!groups.has(group)) groups.set(group, new Set());
-    if (groups.get(group).has(position)) duplicateImages.push(`${group}.${position}`);
-    groups.get(group).add(position);
-  });
-
-  const highestGroup = groups.size ? Math.max(...groups.keys()) : 0;
-  let completeGroups = 0;
-  const missingImages = [];
-  for (let group = 1; group <= highestGroup; group += 1) {
-    const positions = groups.get(group);
-    for (let position = 1; position <= 6; position += 1) {
-      if (!positions?.has(position)) missingImages.push(`${group}.${position}`);
-    }
-    if (positions?.size === 6) completeGroups += 1;
-  }
-  importState.groupCount = highestGroup;
-  importState.completeGroups = completeGroups;
-  importState.invalidFiles = invalidFiles;
-  importState.missingImages = missingImages;
-  importState.duplicateImages = duplicateImages;
-  importState.imageCount = files.length;
-  importState.imageInspected = true;
-  products.forEach((product) => {
-    const positions = groups.get(product.group);
-    product.status = positions?.size === 6 ? "通过" : "图片不完整";
-  });
-  renderProducts();
-  refreshImportValidation();
-  showToast(
-    importState.valid ? "图片编号检查通过" : "图片编号需要修正",
-    importState.valid
-      ? `${highestGroup} 组轮播图，每组 6 张；每组第一张设为预览图。`
-      : importState.errors.join("；"),
-    importState.valid ? "success" : "warning"
-  );
 }
 
 function initEvents() {
@@ -321,14 +621,8 @@ function initEvents() {
     step.classList.add("active");
     document.querySelector(`#${step.dataset.stepTarget}`).scrollIntoView({ behavior: "smooth", block: "start" });
   }));
-
-  document.querySelector("#sheetInput").addEventListener("change", (event) => {
-    if (event.target.files[0]) handleSheetFile(event.target.files[0]);
-  });
-  document.querySelector("#imageInput").addEventListener("change", (event) => {
-    if (event.target.files.length) inspectImageFolder(event.target.files);
-  });
-
+  document.querySelector("#sheetInput").addEventListener("change", (event) => event.target.files[0] && handleSheetFile(event.target.files[0]));
+  document.querySelector("#imageInput").addEventListener("change", (event) => event.target.files.length && inspectImageFolder(event.target.files));
   document.querySelector("#selectAll").addEventListener("change", (event) => {
     document.querySelectorAll(".product-check").forEach((input) => {
       input.checked = event.target.checked;
@@ -337,38 +631,20 @@ function initEvents() {
     updateSelectedCount();
   });
   document.querySelector("#productSearch").addEventListener("input", (event) => renderProducts(event.target.value));
-  document.querySelector("#saveDraftBtn").addEventListener("click", () => showToast("草稿已保存", "当前资料已保存在本地演示环境。", "success"));
-  document.querySelector("#publishBtn").addEventListener("click", () => {
-    if (!selected.size) return showToast("请选择商品", "至少选择一个商品后才能创建任务。", "warning");
-    if (!importState.valid) return showToast("图片与标题尚未完全匹配", "请确保每个 Excel 标题都有一组 N.1 至 N.6 的六张轮播图。", "warning");
-    const storeName = getSelectedLabel("#storeSelect");
-    const productTemplate = getSelectedLabel("#productTemplateSelect");
-    const skuTemplate = getSelectedLabel("#skuTemplateSelect");
-    tasks.unshift({ id: `TASK-DEMO-${String(tasks.length + 1).padStart(3, "0")}`, name: `${storeName} · ${productTemplate} · ${skuTemplate}`, count: selected.size, status: "发布中", progress: 12, time: "刚刚", detail: `已完成 0 / ${selected.size}` });
-    renderTasks();
-    document.querySelector("#todayTaskCount").textContent = tasks.length;
-    document.querySelector("#taskBadge").textContent = tasks.length;
-    showToast("演示任务已创建", "没有请求真实接口，可在“发布任务”中查看本地记录。", "success");
-  });
-
-  ["#storeSelect", "#productTemplateSelect"].forEach((selector) => {
-    document.querySelector(selector).addEventListener("change", () => showToast("ERP 选项已更新", `${getSelectedLabel(selector)} 已选中。`, "success"));
-  });
-  document.querySelector("#skuTemplateSelect").addEventListener("change", () => {
-    renderProducts(document.querySelector("#productSearch").value);
-    showToast("SKU 模板已更新", `${getSelectedLabel("#skuTemplateSelect")} 已应用到全部产品。`, "success");
-  });
-  document.querySelector("#filterBtn").addEventListener("click", () => showToast("筛选条件", "当前显示全部商品，可使用搜索框快速定位。", "warning"));
-  document.querySelector("#refreshTasks").addEventListener("click", () => showToast("状态已刷新", "当前展示本地演示任务。", "success"));
-  document.querySelector("#newTemplateBtn").addEventListener("click", () => showToast("模板编辑器待接入", "下一阶段可以加入完整模板创建与复制功能。", "warning"));
+  document.querySelector("#publishBtn").addEventListener("click", runPublishFlow);
+  document.querySelector("#testMiaoshou").addEventListener("click", () => syncERP(true));
+  document.querySelector("#skuTemplateSelect").addEventListener("change", () => renderProducts(document.querySelector("#productSearch").value));
+  document.querySelector("#filterBtn").addEventListener("click", () => showToast("当前显示全部商品", "可使用搜索框按标题或序号查找。", "success"));
+  document.querySelector("#refreshTasks").addEventListener("click", renderTasks);
+  document.querySelector("#newTemplateBtn").addEventListener("click", () => showToast("模板来自妙手 ERP", "请先在 ERP 网页建立模板，再回到这里同步。", "warning"));
   document.querySelectorAll(".placeholder-action").forEach((button) => button.addEventListener("click", () => {
-    const names = { cos: "腾讯云 COS", miaoshou: "妙手开放平台", temu: "TEMU 官方开放平台" };
-    showToast(`${names[button.dataset.action]}尚未接入`, "需要后端服务保存密钥、签名请求并处理授权回调。", "warning");
+    showToast("尚未启用 TEMU 官方路线", "当前版本使用妙手开放平台发布。", "warning");
   }));
   document.querySelector("#dialogClose").addEventListener("click", closeDialog);
   document.querySelector("#dialogCancel").addEventListener("click", closeDialog);
-  document.querySelector("#dialogBackdrop").addEventListener("click", (event) => { if (event.target.id === "dialogBackdrop") closeDialog(); });
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeDialog(); });
+  document.querySelector("#dialogConfirm").addEventListener("click", closeDialog);
+  document.querySelector("#dialogBackdrop").addEventListener("click", (event) => event.target.id === "dialogBackdrop" && closeDialog());
+  document.addEventListener("keydown", (event) => event.key === "Escape" && closeDialog());
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -376,5 +652,7 @@ document.addEventListener("DOMContentLoaded", () => {
   renderDrafts();
   renderTasks();
   initEvents();
+  refreshImportValidation();
+  syncERP(false);
   iconRefresh();
 });

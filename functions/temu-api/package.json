@@ -1,0 +1,13 @@
+{
+  "name": "temu-publisher-api",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@cloudbase/functions-framework": "^1.0.0",
+    "@cloudbase/js-sdk": "^3.10.0"
+  }
+}

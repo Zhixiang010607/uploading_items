@@ -16,6 +16,9 @@
     />
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+    <script src="https://static.cloudbase.net/cloudbase-js-sdk/3.10.1/cloudbase.full.js" defer></script>
+    <script src="./config.js" defer></script>
     <script src="./app.js" defer></script>
   </head>
   <body>
@@ -36,11 +39,8 @@
           <button class="nav-item active" data-view="publish">
             <i data-lucide="package-plus"></i><span>发布商品</span>
           </button>
-          <button class="nav-item" data-view="drafts">
-            <i data-lucide="file-box"></i><span>商品草稿</span><b>12</b>
-          </button>
           <button class="nav-item" data-view="tasks">
-            <i data-lucide="list-checks"></i><span>发布任务</span><b id="taskBadge">3</b>
+            <i data-lucide="list-checks"></i><span>发布任务</span><b id="taskBadge">0</b>
           </button>
           <button class="nav-item" data-view="templates">
             <i data-lucide="layout-template"></i><span>模板中心</span>
@@ -53,7 +53,7 @@
         <div class="sidebar-foot">
           <div class="connection-line">
             <span class="status-dot warning"></span>
-            <div><strong>演示环境</strong><span>接口尚未连接</span></div>
+            <div><strong>正在连接云端</strong><span>正在检查妙手接口</span></div>
           </div>
           <button class="text-btn" data-view-link="settings">查看接入状态</button>
         </div>
@@ -94,7 +94,7 @@
             <section class="panel-section" id="source">
               <div class="section-title">
                 <div><h2>导入商品资料</h2><p>产品标题从 Excel 读取，轮播图严格按 N.1 至 N.6 的序号匹配。</p></div>
-                <span class="section-state"><i data-lucide="hard-drive"></i>仅在本机预览</span>
+                <span class="section-state"><i data-lucide="hard-drive"></i>选择时仅本地检查</span>
               </div>
               <div class="import-grid">
                 <label class="drop-zone" id="sheetDrop">
@@ -117,18 +117,14 @@
             <section class="panel-section" id="channel">
               <div class="section-title">
                 <div><h2>选择店铺与模板</h2><p>店铺、产品模板和 SKU 模板均来自 ERP 网页中已经建立的数据。</p></div>
-                <span class="section-state"><i data-lucide="refresh-cw"></i>ERP 数据已同步</span>
+                <span class="section-state"><i data-lucide="refresh-cw"></i>正在同步 ERP</span>
               </div>
               <div class="erp-select-grid">
                 <div class="erp-select-column">
                   <span class="erp-field-icon"><i data-lucide="store"></i></span>
                   <div class="field">
                   <label for="storeSelect">目标店铺</label>
-                  <select id="storeSelect">
-                    <option value="us">北美店铺 · Demo US</option>
-                    <option value="eu">欧洲店铺 · Demo EU</option>
-                    <option value="uk">英国店铺 · Demo UK</option>
-                  </select>
+                  <select id="storeSelect" disabled><option value="">正在读取 ERP…</option></select>
                   </div>
                   <small>已绑定店铺</small>
                 </div>
@@ -136,11 +132,7 @@
                   <span class="erp-field-icon product"><i data-lucide="layout-template"></i></span>
                   <div class="field">
                     <label for="productTemplateSelect">产品模板</label>
-                    <select id="productTemplateSelect">
-                      <option value="magnet-v3">冰箱贴产品模板 v3</option>
-                      <option value="eu-multi">欧洲多语言产品模板 v2</option>
-                      <option value="badge">吧唧产品模板 v1</option>
-                    </select>
+                    <select id="productTemplateSelect" disabled><option value="">正在读取 ERP…</option></select>
                   </div>
                   <small>标题规则、描述、类目、轮播图位置</small>
                 </div>
@@ -148,11 +140,7 @@
                   <span class="erp-field-icon sku"><i data-lucide="scan-barcode"></i></span>
                   <div class="field">
                     <label for="skuTemplateSelect">SKU 模板</label>
-                    <select id="skuTemplateSelect">
-                      <option value="single">冰箱贴单规格 SKU 模板</option>
-                      <option value="size">吧唧多尺寸 SKU 模板</option>
-                      <option value="color">颜色多规格 SKU 模板</option>
-                    </select>
+                    <select id="skuTemplateSelect" disabled><option value="">正在读取 ERP…</option></select>
                   </div>
                   <small>SKU 编码、规格、价格和库存</small>
                 </div>
@@ -185,12 +173,15 @@
             </section>
 
             <section class="submit-bar" id="submit">
-              <div>
-                <span class="status-dot warning"></span>
-                <p><strong>当前为演示模式</strong><small>创建任务只会生成本地演示记录，不会发布到店铺。</small></p>
+              <div class="submit-status">
+                <span class="status-dot warning" id="submitStatusDot"></span>
+                <p><strong id="submitStatusTitle">等待选择完整资料</strong><small id="submitStatusText">整个文件夹全部上传并校验成功后，才会继续创建发布任务。</small></p>
+                <div class="upload-progress" id="uploadProgress" hidden>
+                  <div class="progress-track"><span id="uploadProgressBar" style="width:0%"></span></div>
+                  <small id="uploadProgressText">0 / 0</small>
+                </div>
               </div>
               <div class="submit-actions">
-                <button class="btn secondary" id="saveDraftBtn"><i data-lucide="save"></i>保存草稿</button>
                 <button class="btn primary" id="publishBtn"><i data-lucide="send"></i>创建发布任务</button>
               </div>
             </section>
@@ -210,10 +201,10 @@
           <section class="view" id="view-tasks">
             <div class="list-header"><div><h2>发布任务</h2><p>查看每批商品的上传和发布结果。</p></div><button class="btn secondary" id="refreshTasks"><i data-lucide="refresh-cw"></i>刷新状态</button></div>
             <div class="summary-grid">
-              <div class="metric"><span>今日任务</span><strong id="todayTaskCount">3</strong><small>共 186 件商品</small></div>
-              <div class="metric"><span>发布中</span><strong id="processingCount">1</strong><small>后台持续处理</small></div>
-              <div class="metric"><span>发布成功</span><strong>172</strong><small>成功率 92.5%</small></div>
-              <div class="metric alert"><span>需要处理</span><strong>11</strong><small>可修复后重试</small></div>
+              <div class="metric"><span>本次任务</span><strong id="todayTaskCount">0</strong><small>当前浏览器会话</small></div>
+              <div class="metric"><span>上传中</span><strong id="processingCount">0</strong><small>保持网页打开</small></div>
+              <div class="metric"><span>全部完成</span><strong>0</strong><small>图片已完整核验</small></div>
+              <div class="metric alert"><span>需要处理</span><strong>0</strong><small>失败项可再次重试</small></div>
             </div>
             <div class="task-list" id="taskList"></div>
           </section>
@@ -239,7 +230,7 @@
               <div class="integration-head">
                 <span class="integration-icon cloud"><i data-lucide="cloud-upload"></i></span>
                 <div><h3>腾讯云 COS</h3><p>本地图片上传后生成可供平台读取的 HTTPS 地址。</p></div>
-                <span class="tag pending">待接入</span>
+                <span class="tag success" id="cosStatus">已接入</span>
               </div>
               <div class="form-grid">
                 <div class="field"><label>地域 Region</label><input placeholder="例如：ap-guangzhou" /></div>
@@ -254,13 +245,13 @@
               <div class="integration-head">
                 <span class="integration-icon"><i data-lucide="blocks"></i></span>
                 <div><h3>妙手开放平台</h3><p>同步已授权店铺、仓库、运费模板并创建发布任务。</p></div>
-                <span class="tag pending">待接入</span>
+                <span class="tag success" id="miaoshouStatus">已配置</span>
               </div>
               <div class="form-grid">
                 <div class="field"><label>接口地址</label><input value="由后端配置" disabled /></div>
                 <div class="field"><label>App ID</label><input value="后端环境变量 MIAOSHOU_APP_ID" disabled /></div>
                 <div class="field"><label>App Secret</label><input type="password" value="由后端密钥管理保存" disabled /></div>
-                <div class="field span-2"><label>授权状态</label><button class="select-like placeholder-action" data-action="miaoshou"><span>尚未绑定妙手账号</span><i data-lucide="external-link"></i></button></div>
+                <div class="field span-2"><label>连接状态</label><button class="select-like" id="testMiaoshou"><span>检查妙手接口与店铺</span><i data-lucide="refresh-cw"></i></button></div>
               </div>
             </div>
 
