@@ -3,9 +3,10 @@ const { chromium } = require("playwright");
 
 const pageUrl = process.env.STRESS_PAGE_URL || "http://127.0.0.1:4317";
 const imageCount = Number(process.env.STRESS_IMAGE_COUNT || 1998);
-const imageBytes = Number(process.env.STRESS_IMAGE_BYTES || 131072);
-const concurrency = Number(process.env.STRESS_CONCURRENCY || 4);
+const imageBytes = Number(process.env.STRESS_IMAGE_BYTES || 512000);
+const concurrency = Number(process.env.STRESS_CONCURRENCY || 6);
 const skipCount = Number(process.env.STRESS_SKIP_COUNT || 12);
+const attemptTimeoutMs = Number(process.env.STRESS_ATTEMPT_TIMEOUT_MS || 60000);
 
 if (!Number.isInteger(imageCount) || imageCount < 6 || imageCount % 6 !== 0) {
   throw new Error("STRESS_IMAGE_COUNT must be a positive multiple of 6");
@@ -17,7 +18,7 @@ if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32) {
   throw new Error("STRESS_CONCURRENCY must be between 1 and 32");
 }
 
-const batchId = `stress-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+const batchId = process.env.STRESS_BATCH_ID || `stress-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
 const startedAt = Date.now();
 
 function printProgress(update) {
@@ -36,7 +37,7 @@ function printProgress(update) {
     await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForFunction(() => window.cloudbase && window.TEMU_APP_CONFIG, null, { timeout: 60000 });
 
-    const result = await page.evaluate(async ({ batchId, imageCount, imageBytes, concurrency, skipCount }) => {
+    const result = await page.evaluate(async ({ batchId, imageCount, imageBytes, concurrency, skipCount, attemptTimeoutMs }) => {
       const config = window.TEMU_APP_CONFIG;
       const app = window.cloudbase.init({ env: config.envId, accessKey: config.publishableKey });
       const bucket = app.storage.from(config.bucket);
@@ -98,6 +99,18 @@ function printProgress(update) {
         return data;
       }
 
+      async function withTimeout(promise, timeoutMs, message) {
+        let timer;
+        const timeout = new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+        });
+        try {
+          return await Promise.race([promise, timeout]);
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
       await window.reportStressProgress({ phase: "hash", current: 0, total: imageCount });
       const items = new Array(imageCount);
       const indexes = Array.from({ length: imageCount }, (_, index) => index);
@@ -142,17 +155,21 @@ function printProgress(update) {
         for (let attempt = 1; attempt <= 5; attempt += 1) {
           try {
             const blob = new Blob([makeBytes(index)], { type: item.mimeType });
-            const upload = await bucket.upload(item.objectKey, blob, {
-              upsert: true,
-              contentType: item.mimeType,
-              metadata: {
-                sha256: item.sha256,
-                productIndex: String(item.productIndex),
-                imagePosition: String(item.imagePosition),
-                originalName: item.originalName,
-                stressTest: "true"
-              }
-            });
+            const upload = await withTimeout(
+              bucket.upload(item.objectKey, blob, {
+                upsert: true,
+                contentType: item.mimeType,
+                metadata: {
+                  sha256: item.sha256,
+                  productIndex: String(item.productIndex),
+                  imagePosition: String(item.imagePosition),
+                  originalName: item.originalName,
+                  stressTest: "true"
+                }
+              }),
+              attemptTimeoutMs,
+              `${item.productIndex}.${item.imagePosition} exceeded ${attemptTimeoutMs}ms`
+            );
             if (upload?.error) throw new Error(upload.error.message || "storage upload failed");
             return;
           } catch (error) {
@@ -161,6 +178,35 @@ function printProgress(update) {
           }
         }
         throw new Error(`${item.productIndex}.${item.imagePosition} failed after retries: ${lastError?.message}`);
+      }
+
+      if (batch.resumed) {
+        await api(`/batches/${batchId}/finalize`, { method: "POST", body: {} });
+        const status = await api(`/batches/${batchId}`);
+        const pending = status.items.filter((item) => item.storage_status !== "uploaded");
+        const indexBySlot = new Map(items.map((item, index) => [`${item.productIndex}.${item.imagePosition}`, index]));
+        await window.reportStressProgress({ phase: "resume-existing", current: 0, total: pending.length, note: `${imageCount - pending.length} already verified` });
+        await mapConcurrent(pending, concurrency, async (serverItem) => {
+          const slot = `${serverItem.product_index}.${serverItem.image_position}`;
+          const index = indexBySlot.get(slot);
+          await uploadItem(items[index], index);
+        }, (current) => window.reportStressProgress({ phase: "resume-existing", current, total: pending.length }));
+        const final = await api(`/batches/${batchId}/finalize`, { method: "POST", body: {} });
+        if (!final.complete || final.matched_count !== imageCount || final.failed_count !== 0) {
+          throw new Error(`resumed verification mismatch: ${JSON.stringify(final)}`);
+        }
+        await window.reportStressProgress({ phase: "verified", current: imageCount, total: imageCount, note: "resumed batch fully matched" });
+        return {
+          batchId,
+          resumed: true,
+          productCount: products.length,
+          imageCount,
+          imageBytes,
+          totalBytes: imageCount * imageBytes,
+          concurrency,
+          deferredAndRetried: pending.length,
+          final
+        };
       }
 
       const firstPass = items.map((item, index) => ({ item, index })).filter(({ index }) => !skippedIndexes.has(index));
@@ -212,7 +258,7 @@ function printProgress(update) {
         deferredAndRetried: pending.length,
         final
       };
-    }, { batchId, imageCount, imageBytes, concurrency, skipCount });
+    }, { batchId, imageCount, imageBytes, concurrency, skipCount, attemptTimeoutMs });
 
     process.stdout.write(`${JSON.stringify({ ok: true, elapsedSeconds: (Date.now() - startedAt) / 1000, ...result }, null, 2)}\n`);
   } catch (error) {

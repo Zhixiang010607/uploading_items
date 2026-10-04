@@ -6,6 +6,7 @@ const IMAGE_BUCKET = process.env.IMAGE_BUCKET || "temu-product-images";
 const MIAOSHOU_BASE_URL = "https://openapi-erp.91miaoshou.com";
 const MAX_ITEMS = 12000;
 const DB_PAGE_SIZE = 1000;
+const MANIFEST_INSERT_CHUNK = 500;
 const SIGN_CHUNK_LIMIT = 50;
 const IMPORT_CHUNK_LIMIT = 24;
 
@@ -155,8 +156,8 @@ async function createBatch(db, input) {
     sha256: item.sha256,
     mime_type: item.mimeType
   }));
-  for (let offset = 0; offset < rows.length; offset += 200) {
-    const inserted = await db.from("temu_upload_items").insert(rows.slice(offset, offset + 200));
+  for (let offset = 0; offset < rows.length; offset += MANIFEST_INSERT_CHUNK) {
+    const inserted = await db.from("temu_upload_items").insert(rows.slice(offset, offset + MANIFEST_INSERT_CHUNK));
     if (inserted.error) throw new ApiError(500, "保存图片清单失败", inserted.error);
   }
   return { ...batch, resumed: false };

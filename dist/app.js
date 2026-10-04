@@ -1,4 +1,6 @@
 const APP_CONFIG = window.TEMU_APP_CONFIG;
+const UPLOAD_CONCURRENCY = 6;
+const UPLOAD_ATTEMPT_TIMEOUT_MS = 60000;
 const cloudApp = window.cloudbase?.init({
   env: APP_CONFIG.envId,
   accessKey: APP_CONFIG.publishableKey
@@ -347,6 +349,18 @@ function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+async function withTimeout(promise, timeoutMs, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 async function requestUploadWakeLock() {
   if (!("wakeLock" in navigator) || document.visibilityState !== "visible" || uploadWakeLock) return;
   try {
@@ -370,16 +384,20 @@ async function uploadOne(serverItem, manifestItem) {
   let lastError;
   for (let attempt = 1; attempt <= 5; attempt += 1) {
     try {
-      const result = await imageBucket.upload(serverItem.object_key, file, {
-        upsert: true,
-        contentType: manifestItem.mimeType,
-        metadata: {
-          sha256: manifestItem.sha256,
-          productIndex: String(manifestItem.productIndex),
-          imagePosition: String(manifestItem.imagePosition),
-          originalName: manifestItem.originalName
-        }
-      });
+      const result = await withTimeout(
+        imageBucket.upload(serverItem.object_key, file, {
+          upsert: true,
+          contentType: manifestItem.mimeType,
+          metadata: {
+            sha256: manifestItem.sha256,
+            productIndex: String(manifestItem.productIndex),
+            imagePosition: String(manifestItem.imagePosition),
+            originalName: manifestItem.originalName
+          }
+        }),
+        UPLOAD_ATTEMPT_TIMEOUT_MS,
+        `${slot} 单次上传超过 60 秒`
+      );
       if (result?.error) throw new Error(result.error.message || "腾讯云存储返回错误");
       return;
     } catch (error) {
@@ -399,7 +417,7 @@ async function uploadAndVerify(batchId, manifestItems) {
     let settled = 0;
     let failures = 0;
     setSubmitStatus("正在上传全部图片", `第 ${round} 轮：仅重试尚未通过云端核验的图片。`, manifestItems.length - pending.length, manifestItems.length, "warning");
-    await mapWithConcurrency(pending, 4, async (item) => {
+    await mapWithConcurrency(pending, UPLOAD_CONCURRENCY, async (item) => {
       const slot = `${item.product_index}.${item.image_position}`;
       try {
         await uploadOne(item, manifestBySlot.get(slot));
@@ -420,7 +438,7 @@ async function uploadAndVerify(batchId, manifestItems) {
     const pending = status.items.filter((item) => item.storage_status !== "uploaded");
     let settled = 0;
     setSubmitStatus("正在执行最终恢复", `常规重试结束，最后补传 ${pending.length} 张失败图片。`, 0, pending.length, "warning");
-    await mapWithConcurrency(pending, 4, async (item) => {
+    await mapWithConcurrency(pending, UPLOAD_CONCURRENCY, async (item) => {
       const slot = `${item.product_index}.${item.image_position}`;
       try {
         await uploadOne(item, manifestBySlot.get(slot));
