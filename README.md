@@ -23,7 +23,7 @@
 - 图片：CloudBase 云存储桶 `temu-product-images`。
 - 清单：CloudBase PostgreSQL 表 `temu_upload_batches` 和 `temu_upload_items`。
 
-妙手 AppSecret 只保存在云函数环境变量中，不写入网页或 Git。当前妙手应用仍在审核中，接口返回 `appNotFound`；在审核通过前，网页会明确显示 ERP 连接失败。
+妙手 AppSecret 只保存在云函数环境变量中，不写入网页或 Git。妙手应用已审核通过；网站固定使用 TEMU 全托管 `pddkj` 接口。店铺列表和全托管采集箱接口仍需在妙手应用权限中单独授权，缺少权限时网页会明确显示 ERP 连接失败。
 
 临时图片清理接口只接受状态为 `published` 的整批任务，不能在发布完成前误删图片。
 

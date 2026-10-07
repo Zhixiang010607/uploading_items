@@ -528,7 +528,7 @@ function findRecordArray(value, depth = 0) {
   if (depth > 6 || value == null) return [];
   if (Array.isArray(value)) return value.length && value.every((item) => typeof item === "object") ? value : [];
   if (typeof value !== "object") return [];
-  for (const key of ["records", "rows", "list", "items", "data", "result"]) {
+  for (const key of ["records", "rows", "list", "items", "shopList", "detailList", "data", "result"]) {
     if (key in value) {
       const found = findRecordArray(value[key], depth + 1);
       if (found.length) return found;
@@ -549,7 +549,7 @@ function recordValue(record, keys) {
 function fillSelect(selector, records, kind) {
   const select = document.querySelector(selector);
   const idKeys = kind === "shop" ? ["shopId", "shop_id", "id"] : ["detailId", "collectBoxDetailId", "templateId", "id"];
-  const nameKeys = kind === "shop" ? ["shopName", "shop_name", "name", "mallName"] : ["title", "productTitle", "goodsName", "templateName", "name"];
+  const nameKeys = kind === "shop" ? ["shopNick", "shopName", "shop_name", "name", "mallName"] : ["title", "productTitle", "goodsName", "templateName", "name"];
   const options = records.map((record, index) => {
     const value = recordValue(record, idKeys);
     const label = recordValue(record, nameKeys) || `${kind === "shop" ? "店铺" : "模板"} ${index + 1}`;
@@ -569,10 +569,16 @@ async function syncERP(showResult = false) {
   });
   try {
     await api("/health");
-    const shopsResponse = await api("/erp/read", { method: "POST", body: { resource: "shops", params: { pageNum: 1, pageSize: 200 } } });
+    const shopsResponse = await api("/erp/read", {
+      method: "POST",
+      body: { resource: "shops", params: { platform: "pddkj", site: "PDDKJ", pageNo: 1, pageSize: 100 } }
+    });
     const shops = findRecordArray(shopsResponse);
     if (!fillSelect("#storeSelect", shops, "shop")) throw new Error("妙手接口已连接，但没有读取到已绑定店铺");
-    const templatesResponse = await api("/erp/read", { method: "POST", body: { resource: "productTemplates", params: { pageNum: 1, pageSize: 200 } } });
+    const templatesResponse = await api("/erp/read", {
+      method: "POST",
+      body: { resource: "productTemplates", params: { pageNo: 0, pageSize: 500, filter: {} } }
+    });
     const templates = findRecordArray(templatesResponse);
     if (!fillSelect("#productTemplateSelect", templates, "template")) throw new Error("没有读取到可用产品模板");
     fillSelect("#skuTemplateSelect", templates, "template");

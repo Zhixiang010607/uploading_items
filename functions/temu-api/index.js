@@ -307,9 +307,9 @@ async function cleanupBatch(db, storage, batchId) {
 
 const READ_ENDPOINTS = {
   shops: "/open/v1/product/shop/shop/get_shop_list",
-  productTemplates: "/open/v1/product/collect_box/pddkj_choice/collect_box/search_collect_box_detail_list",
-  productTemplateDetail: "/open/v1/product/collect_box/pddkj_choice/collect_box/get_shop_collect_item_info",
-  skuTemplateDetail: "/open/v1/product/collect_box/pddkj_choice/collect_box/get_site_collect_item_info"
+  productTemplates: "/open/v1/product/collect_box/pddkj/collect_box/search_collect_box_detail_list",
+  productTemplateDetail: "/open/v1/product/collect_box/pddkj/collect_box/get_shop_collect_item_info",
+  skuTemplateDetail: "/open/v1/product/collect_box/pddkj/collect_box/get_site_collect_item_info"
 };
 
 exports.main = async (event, context) => {
