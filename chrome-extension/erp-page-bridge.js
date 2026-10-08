@@ -9,6 +9,7 @@
   const ERP_COLLECT_BOX_BASE = "/api/platform/pddkj/move/collect_box/";
   const PAGE_SIZE = 100;
   const MAX_PAGES = 100;
+  let erpAppApiPromise = null;
   const SHOP_ENDPOINTS = [
     "/api/auth/shop/getAllShopV2",
     "/api/auth/shop/getAllShop"
@@ -173,26 +174,114 @@
     };
   }
 
-  async function postErp(path, body) {
-    const response = await fetch(new URL(path, window.location.origin), {
-      method: "POST",
-      credentials: "include",
-      cache: "no-store",
-      headers: {
-        Accept: "application/json",
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(body)
+  function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function findMainModuleUrl() {
+    const moduleScript = Array.from(document.scripts).find((script) => {
+      const src = script.src || "";
+      return script.type === "module" && /\/assets\/\d+\/index-[a-f0-9]+\.js(?:\?|$)/i.test(src);
     });
-    let payload;
-    try {
-      payload = await response.json();
-    } catch {
-      throw new Error("妙手登录状态不可用，请重新登录妙手 ERP");
+    if (!moduleScript?.src) throw new Error("没有找到妙手当前网页模块，请刷新妙手页面后重试");
+    return moduleScript.src;
+  }
+
+  function findEndpointExport(source, endpoint) {
+    const escapedEndpoint = escapeRegExp(endpoint);
+    const functionPattern = new RegExp(
+      'function\\s+([\\w$]+)\\(e,t\\)\\{return\\s+[\\w$]+\\(e,\\{url:`\\$\\{[\\w$]+\\}' + escapedEndpoint + '`'
+    );
+    const arrowPattern = new RegExp(
+      '(?:const|,)\\s*([\\w$]+)=\\(e,t\\)=>[\\w$]+\\(e,\\{url:`\\$\\{[\\w$]+\\}' + escapedEndpoint + '`'
+    );
+    const internalName = source.match(functionPattern)?.[1] || source.match(arrowPattern)?.[1];
+    if (!internalName) throw new Error(`妙手当前版本中未找到接口 ${endpoint}`);
+
+    const exportStart = source.lastIndexOf("export{");
+    if (exportStart < 0) throw new Error("妙手当前网页模块没有公开接口映射");
+    const exportBlock = source.slice(exportStart + 7);
+    const exportMatch = exportBlock.match(
+      new RegExp(`(?:^|,)${escapeRegExp(internalName)}\\s+as\\s+([\\w$]+)(?:,|})`)
+    );
+    if (!exportMatch?.[1]) throw new Error(`妙手当前版本没有导出接口 ${endpoint}`);
+    return exportMatch[1];
+  }
+
+  function findAssetModuleUrl(source, mainModuleUrl, prefix) {
+    const match = source.match(new RegExp(`assets/\\d+/(${escapeRegExp(prefix)}-[a-f0-9]+\\.js)`, "i"));
+    if (!match?.[1]) throw new Error(`妙手当前版本缺少 ${prefix} 模块`);
+    return new URL(`./${match[1]}`, mainModuleUrl).href;
+  }
+
+  async function loadEndpointModule(moduleUrl, endpoints) {
+    const [source, module] = await Promise.all([
+      fetch(moduleUrl, { credentials: "omit", cache: "force-cache" }).then((response) => {
+        if (!response.ok) throw new Error(`妙手网页模块读取失败（HTTP ${response.status}）`);
+        return response.text();
+      }),
+      import(moduleUrl)
+    ]);
+    return Object.fromEntries(endpoints.map((endpoint) => {
+      const exportName = findEndpointExport(source, endpoint);
+      const api = module[exportName];
+      if (typeof api !== "function") throw new Error(`妙手接口 ${endpoint} 当前不可调用`);
+      return [endpoint, api];
+    }));
+  }
+
+  async function loadErpAppApi() {
+    const moduleUrl = findMainModuleUrl();
+    const [source, module] = await Promise.all([
+      fetch(moduleUrl, { credentials: "omit", cache: "force-cache" }).then((response) => {
+        if (!response.ok) throw new Error(`妙手网页模块读取失败（HTTP ${response.status}）`);
+        return response.text();
+      }),
+      import(moduleUrl)
+    ]);
+    const endpoints = [
+      "rebuildCollectItemInfoBySkuTemplate",
+      "createCollectBoxItem"
+    ];
+    const mainApi = Object.fromEntries(endpoints.map((endpoint) => {
+      const exportName = findEndpointExport(source, endpoint);
+      const api = module[exportName];
+      if (typeof api !== "function") throw new Error(`妙手接口 ${endpoint} 当前不可调用`);
+      return [endpoint, api];
+    }));
+    const productTemplateApi = await loadEndpointModule(
+      findAssetModuleUrl(source, moduleUrl, "item_template"),
+      ["getItemTemplate"]
+    );
+    return { ...mainApi, ...productTemplateApi };
+  }
+
+  async function getErpAppApi() {
+    if (!erpAppApiPromise) {
+      erpAppApiPromise = loadErpAppApi().catch((error) => {
+        erpAppApiPromise = null;
+        throw error;
+      });
     }
-    if (!response.ok) throw new Error(payload?.reason || payload?.message || `妙手接口返回 HTTP ${response.status}`);
-    assertSuccessfulPayload(payload);
-    return payload;
+    return erpAppApiPromise;
+  }
+
+  function readableErpError(error) {
+    const payload = error?.response?.data;
+    return payload?.reason || payload?.message || payload?.msg || error?.reason || error?.message || "妙手接口调用失败";
+  }
+
+  async function postErp(path, body) {
+    const endpoint = String(path).split("/").filter(Boolean).pop();
+    try {
+      const api = await getErpAppApi();
+      if (typeof api[endpoint] !== "function") throw new Error(`不允许调用妙手接口 ${endpoint}`);
+      const payload = await api[endpoint]("pddkj", body);
+      assertSuccessfulPayload(payload);
+      return payload;
+    } catch (error) {
+      throw new Error(readableErpError(error));
+    }
   }
 
   function collectItemInfo(payload) {
@@ -221,20 +310,20 @@
 
   async function buildCombinedTemplate(job) {
     const core = globalThis.TemuTemplateDraftCore;
-    const productTemplate = await postErp(`${ERP_COLLECT_BOX_BASE}getSiteCollectItemInfoByShopItemTemplate`, {
-      site: core.SITE,
-      shopIds: [job.shopId],
-      itemTemplateId: job.productTemplateId,
-      shopIdAndItemTemplateIdMap: { [job.shopId]: job.productTemplateId }
+    const productResponse = await postErp("/api/platform/pddkj/item/item_template/getItemTemplate", {
+      itemTemplateId: job.productTemplateId
     });
-    const productInfo = collectItemInfo(productTemplate);
+    const productTemplate = core.findNamedObject(productResponse, ["getItemTemplate", "itemTemplate"]);
+    if (!productTemplate) throw new Error("产品模板详情为空");
+    const productInfo = core.applyProductTemplateModules(core.createDefaultCollectInfo(job.shopId), productTemplate);
+    if (!productInfo.cid) throw new Error("产品模板没有类目，无法套用 SKU 模板");
     const skuTemplate = await postErp(`${ERP_COLLECT_BOX_BASE}rebuildCollectItemInfoBySkuTemplate`, {
       skuPropTemplateId: job.skuTemplateId,
       collectItemInfo: JSON.stringify(productInfo),
       applicationType: "cover",
       coverType: "completeCover"
     });
-    return collectItemInfo(skuTemplate);
+    return core.applyProductSkuAttributes(collectItemInfo(skuTemplate), productTemplate.skuAttribute);
   }
 
   async function createTemplateDrafts(input) {

@@ -29,6 +29,8 @@ header p { margin: 3px 0 0; color: #6b7781; font-size: 12px; }
 .synced-at { min-height: 18px; margin: 8px 18px 14px; color: #7a858e; font-size: 11px; }
 .primary { width: calc(100% - 36px); height: 42px; margin: 0 18px; border: 1px solid #d28e00; border-radius: 6px; background: #f6a800; color: #172029; font-weight: 750; }
 .primary:disabled { border-color: #d6dadd; background: #e8ebed; color: #939ba1; cursor: not-allowed; }
+.secondary { width: calc(100% - 36px); height: 40px; margin: 8px 18px 0; border: 1px solid #b8c4cb; border-radius: 6px; background: #fff; color: #176b55; font-weight: 750; }
+.secondary:disabled { color: #939ba1; background: #f4f6f7; cursor: not-allowed; }
 .links { margin: 10px 18px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .links button { min-height: 36px; padding: 0 8px; border: 1px solid #cbd3d8; border-radius: 6px; background: #fff; color: #2b5f88; font-size: 12px; font-weight: 650; }
 footer { margin-top: 18px; padding: 14px 18px; border-top: 1px solid #dbe1e5; color: #66737d; background: #f8fafa; font-size: 11px; line-height: 1.55; }

@@ -15,7 +15,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       payload: message.payload
     });
   })()
-    .then(sendResponse)
-    .catch((error) => sendResponse({ ok: false, error: error.message || "创建未发布草稿失败" }));
+    .then(async (response) => {
+      if (message.preflight) {
+        await chrome.storage.local.set({
+          temuTemplatePreflightResult: {
+            ok: Boolean(response?.ok && response?.payload?.dryRun),
+            response,
+            labels: message.labels || {},
+            checkedAt: new Date().toISOString()
+          }
+        });
+      }
+      sendResponse(response);
+    })
+    .catch(async (error) => {
+      const response = { ok: false, error: error.message || "创建未发布草稿失败" };
+      if (message.preflight) {
+        await chrome.storage.local.set({
+          temuTemplatePreflightResult: {
+            ok: false,
+            response,
+            labels: message.labels || {},
+            checkedAt: new Date().toISOString()
+          }
+        });
+      }
+      sendResponse(response);
+    });
   return true;
 });

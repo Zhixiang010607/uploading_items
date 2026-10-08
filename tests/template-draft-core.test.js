@@ -68,3 +68,64 @@ test("finds JSON encoded collect item information", () => {
   const payload = { data: { siteCollectItemInfo: JSON.stringify({ cid: "123", title: "Template" }) } };
   assert.deepEqual(core.findNamedObject(payload, ["siteCollectItemInfo"]), { cid: "123", title: "Template" });
 });
+
+test("applies reusable product template modules without sharing references", () => {
+  const template = {
+    cid: 456,
+    attribute: { attributes: [{ id: "material", value: "metal" }] },
+    productInfo: {
+      productOriginCountry: "CN",
+      productOriginCertFiles: [{ url: "https://example.test/cert.jpg" }],
+      personalizationSwitch: "1"
+    },
+    package: {
+      outerPackageShape: "BOX",
+      outerPackageImgUrls: ["https://example.test/package.jpg"]
+    },
+    description: {
+      goodsLayerDecorationReqs: '[{"type":"text","value":"description"}]'
+    },
+    productGuideFile: {
+      productGuideFileName: "guide.pdf",
+      productGuideFileUrl: "https://example.test/guide.pdf"
+    },
+    basePlate: { type: "1" }
+  };
+  const item = core.applyProductTemplateModules(core.createDefaultCollectInfo("shop-1"), template);
+
+  assert.equal(item.cid, "456");
+  assert.equal(item.productOriginCountry, "CN");
+  assert.equal(item.outerPackageShape, "BOX");
+  assert.equal(item.goodsLayerDecorationReqs[0].value, "description");
+  assert.equal(item.productGuideFileName, "guide.pdf");
+  assert.equal(item.isBasePlate, "1");
+  item.attributes[0].value = "changed";
+  assert.equal(template.attribute.attributes[0].value, "metal");
+});
+
+test("applies product SKU settings to every rebuilt SKU", () => {
+  const item = {
+    skuMap: {
+      one: { price: "1.00" },
+      two: { price: "2.00" }
+    }
+  };
+  core.applyProductSkuAttributes(item, {
+    length: 10,
+    width: 20,
+    netWeight: 30,
+    ignoredField: "do not copy"
+  });
+
+  assert.equal(item.skuMap.one.length, 10);
+  assert.equal(item.skuMap.two.width, 20);
+  assert.equal(item.skuMap.one.netWeight, 30);
+  assert.equal(item.skuMap.one.ignoredField, undefined);
+});
+
+test("rejects invalid product descriptions before any draft can be created", () => {
+  assert.throws(() => core.applyProductTemplateModules(
+    core.createDefaultCollectInfo("shop-1"),
+    { description: { goodsLayerDecorationReqs: "not-json" } }
+  ), /商品描述格式无效/);
+});

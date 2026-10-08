@@ -97,12 +97,139 @@
     };
   }
 
+  function createDefaultCollectInfo(shopId) {
+    return {
+      collectBoxDetailShopList: [{
+        shopId,
+        shopName: "",
+        sizeTemplateId: "",
+        brandId: null
+      }],
+      cid: "",
+      attributes: [],
+      title: "",
+      multiLanguageTitleMap: { en: "" },
+      itemNum: "",
+      productOriginCountry: "",
+      productOriginProvince: "",
+      productOriginCertFiles: [],
+      outerGoodsUrl: "",
+      imgUrls: [],
+      personalizationSwitch: "0",
+      saleAttributes: [],
+      skuMap: {},
+      sizeCharts: [],
+      shopIdAndGoodsModelReqMap: {},
+      isBasePlate: "0",
+      basePlateSkuKey: "",
+      mainImgAppVideoId: "",
+      mainImgVideoUrl: "",
+      outerPackageShape: "",
+      outerPackageType: "",
+      outerPackageImgUrls: [],
+      goodsLayerDecorationReqs: [],
+      sourceList: [],
+      inventoryRegion: 1,
+      productGuideFileUrl: "",
+      productGuideFileName: "",
+      translateLanguages: [],
+      collectShowSizeTemplateIds: [],
+      firstType: "",
+      technologyType: "",
+      twiceType: [],
+      vehicleLibraryRelationList: [],
+      notesVideoId: "",
+      notesVideoUrl: "",
+      manufacturingLocationRegionShortNameList: []
+    };
+  }
+
+  function applyProductTemplateModules(item, template) {
+    item.cid = template.cid == null ? "" : String(template.cid);
+    if (template.attribute?.attributes) item.attributes = clone(template.attribute.attributes);
+
+    if (template.productInfo) {
+      const fields = [
+        "productOriginCountry",
+        "productOriginProvince",
+        "productOriginCertFiles",
+        "manufacturingLocationRegionShortNameList",
+        "outerGoodsUrl",
+        "personalizationSwitch",
+        "technologyType",
+        "firstType",
+        "twiceType"
+      ];
+      fields.forEach((field) => {
+        if (template.productInfo[field] !== undefined) item[field] = clone(template.productInfo[field]);
+      });
+    }
+
+    if (template.package) {
+      ["outerPackageShape", "outerPackageType", "outerPackageImgUrls"].forEach((field) => {
+        if (template.package[field] !== undefined) item[field] = clone(template.package[field]);
+      });
+    }
+
+    if (template.description?.goodsLayerDecorationReqs !== undefined) {
+      const description = template.description.goodsLayerDecorationReqs;
+      try {
+        item.goodsLayerDecorationReqs = typeof description === "string" ? JSON.parse(description) : clone(description);
+      } catch {
+        throw new Error("产品模板中的商品描述格式无效");
+      }
+    }
+
+    if (template.productGuideFile) {
+      ["productGuideFileName", "productGuideFileUrl"].forEach((field) => {
+        if (template.productGuideFile[field] !== undefined) item[field] = template.productGuideFile[field];
+      });
+    }
+    if (template.basePlate?.type !== undefined) item.isBasePlate = template.basePlate.type;
+    return item;
+  }
+
+  function applyProductSkuAttributes(item, skuAttribute) {
+    if (!skuAttribute || typeof skuAttribute !== "object") return item;
+    const fields = [
+      "isSensitive",
+      "sensitiveTypes",
+      "sensitiveLimit",
+      "length",
+      "width",
+      "height",
+      "weight",
+      "skuClassification",
+      "numberOfPieces",
+      "pieceUnitCode",
+      "individuallyPacked",
+      "netContentNumber",
+      "netContentUnitCode",
+      "mixedType",
+      "numberOfPiecesNew",
+      "pieceNewUnitCode",
+      "totalNetContentNumber",
+      "totalNetContentUnitCode",
+      "netWeight"
+    ];
+    Object.values(item.skuMap || {}).forEach((sku) => {
+      if (!sku || typeof sku !== "object") return;
+      fields.forEach((field) => {
+        if (skuAttribute[field] !== undefined) sku[field] = clone(skuAttribute[field]);
+      });
+    });
+    return item;
+  }
+
   const api = Object.freeze({
     SITE,
     normalizeDraftJob,
     findNamedObject,
     applyProductOverrides,
-    buildCreatePayload
+    buildCreatePayload,
+    createDefaultCollectInfo,
+    applyProductTemplateModules,
+    applyProductSkuAttributes
   });
 
   globalThis.TemuTemplateDraftCore = api;

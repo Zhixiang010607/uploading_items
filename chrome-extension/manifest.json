@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "妙手模板与草稿助手",
-  "version": "1.2.0",
+  "version": "1.2.7",
   "description": "同步 TEMU 全托管店铺与模板，并在发布助手明确请求时创建未发布草稿。",
   "permissions": [
     "activeTab",
@@ -17,6 +17,15 @@
   "action": {
     "default_title": "妙手模板只读同步",
     "default_popup": "popup.html"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "打开妙手模板与草稿助手"
+    }
   },
   "content_scripts": [
     {
