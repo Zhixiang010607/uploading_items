@@ -14,49 +14,17 @@
       type="image/svg+xml"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23101820'/%3E%3Cpath d='M13 17h38v10H37v24H27V27H13z' fill='%23f6a800'/%3E%3C/svg%3E"
     />
-    <link rel="stylesheet" href="./styles.css?v=20261008-9" />
+    <link rel="stylesheet" href="./styles.css?v=20261008-11" />
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
     <script src="https://static.cloudbase.net/cloudbase-js-sdk/3.10.1/cloudbase.full.js" defer></script>
-    <script src="./config.js?v=20261008-9" defer></script>
-    <script src="./app.js?v=20261008-9" defer></script>
+    <script src="./config.js?v=20261008-11" defer></script>
+    <script src="./app.js?v=20261008-11" defer></script>
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar" id="sidebar">
-        <div class="brand">
-          <div class="brand-mark">T</div>
-          <div>
-            <strong>TEMU 全托管发布</strong>
-            <span>商品批量发布</span>
-          </div>
-          <button class="icon-btn sidebar-close" id="sidebarClose" aria-label="关闭导航">
-            <i data-lucide="x"></i>
-          </button>
-        </div>
-
-        <nav class="nav-list" aria-label="主导航">
-          <button class="nav-item active" data-view="publish">
-            <i data-lucide="package-plus"></i><span>发布商品</span>
-          </button>
-        </nav>
-
-        <div class="sidebar-foot">
-          <div class="connection-line">
-            <span class="status-dot warning"></span>
-            <div><strong>正在连接云端</strong><span>正在检查妙手接口</span></div>
-          </div>
-          <small class="credential-state">App ID / Key 已由后端绑定</small>
-        </div>
-      </aside>
-
-      <div class="mobile-backdrop" id="mobileBackdrop"></div>
-
       <main class="main-area">
         <header class="topbar">
-          <button class="icon-btn menu-btn" id="menuBtn" aria-label="打开导航">
-            <i data-lucide="menu"></i>
-          </button>
           <div class="page-heading">
             <h1 id="pageTitle">发布商品</h1>
             <p id="pageSubtitle">TEMU 全托管商品批量发布</p>
@@ -112,9 +80,6 @@
                   </div>
                   <small>SKU 编码、规格、价格和库存</small>
                 </div>
-              </div>
-              <div class="erp-source-note">
-                <button class="text-btn" id="refreshERP">重新读取 ERP</button>
               </div>
             </section>
 

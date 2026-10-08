@@ -661,9 +661,6 @@ function applyReadOnlyTemplateSync(payload, showResult = false) {
   sourceState.title = `Chrome 辅助插件只读同步：${shopDescription}，${productCount} 个产品模板，${skuCount} 个 SKU 模板`;
   sourceState.classList.toggle("connected", erpReady);
 
-  const connection = document.querySelector(".sidebar-foot .connection-line");
-  connection.querySelector("strong").textContent = erpReady ? "只读数据已同步" : "模板已同步";
-  connection.querySelector("span:last-child").textContent = `${shopCount ? `${shopCount} 个店铺 · ` : ""}${productCount} 个产品模板 · ${skuCount} 个 SKU 模板`;
   if (showResult) {
     showToast(
       "妙手模板已只读同步",
@@ -737,8 +734,6 @@ async function syncERP(showResult = false) {
         ? "店铺 ID 已读取；请在已登录的妙手模板页面点击 Chrome 辅助插件进行只读同步。"
         : "请在已登录的妙手模板页面点击 Chrome 辅助插件进行只读同步。";
       sourceState.classList.remove("connected");
-      document.querySelector(".sidebar-foot .connection-line strong").textContent = "云端已连接";
-      document.querySelector(".sidebar-foot .connection-line span:last-child").textContent = "妙手店铺可用 · 模板等待只读同步";
       if (showResult) {
         showToast(
           "妙手店铺已读取",
@@ -754,8 +749,6 @@ async function syncERP(showResult = false) {
     sourceState.innerHTML = '<i data-lucide="circle-alert"></i>ERP 连接失败';
     sourceState.title = error.message;
     sourceState.classList.remove("connected");
-    document.querySelector(".sidebar-foot .connection-line strong").textContent = "腾讯云已连接";
-    document.querySelector(".sidebar-foot .connection-line span:last-child").textContent = `妙手：${error.message}`;
     if (readOnlyTemplateSync) applyReadOnlyTemplateSync(readOnlyTemplateSync, false);
     if (showResult) showToast("妙手连接失败", error.message, "warning");
   }
@@ -790,11 +783,6 @@ function openProductDialog(id) {
   </div>`);
 }
 
-function closeSidebar() {
-  document.querySelector("#sidebar").classList.remove("open");
-  document.querySelector("#mobileBackdrop").classList.remove("show");
-}
-
 function initEvents() {
   document.addEventListener("visibilitychange", () => {
     if (publishRunning && document.visibilityState === "visible") requestUploadWakeLock();
@@ -804,12 +792,6 @@ function initEvents() {
     event.preventDefault();
     event.returnValue = "";
   });
-  document.querySelector("#menuBtn").addEventListener("click", () => {
-    document.querySelector("#sidebar").classList.add("open");
-    document.querySelector("#mobileBackdrop").classList.add("show");
-  });
-  document.querySelector("#sidebarClose").addEventListener("click", closeSidebar);
-  document.querySelector("#mobileBackdrop").addEventListener("click", closeSidebar);
   document.querySelector("#sheetInput").addEventListener("change", (event) => event.target.files[0] && handleSheetFile(event.target.files[0]));
   document.querySelector("#imageInput").addEventListener("change", (event) => event.target.files.length && inspectImageFolder(event.target.files));
   document.querySelector("#selectAll").addEventListener("change", (event) => {
@@ -822,7 +804,6 @@ function initEvents() {
   document.querySelector("#productSearch").addEventListener("input", (event) => renderProducts(event.target.value));
   document.querySelector("#queueBtn").addEventListener("click", () => runPublishFlow("queue"));
   document.querySelector("#publishBtn").addEventListener("click", () => runPublishFlow("publish"));
-  document.querySelector("#refreshERP").addEventListener("click", () => syncERP(true));
   document.querySelector("#skuTemplateSelect").addEventListener("change", () => renderProducts(document.querySelector("#productSearch").value));
   document.querySelector("#filterBtn").addEventListener("click", () => showToast("当前显示全部商品", "可使用搜索框按标题或序号查找。", "success"));
   document.querySelector("#dialogClose").addEventListener("click", closeDialog);
