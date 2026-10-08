@@ -14,12 +14,12 @@
       type="image/svg+xml"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23101820'/%3E%3Cpath d='M13 17h38v10H37v24H27V27H13z' fill='%23f6a800'/%3E%3C/svg%3E"
     />
-    <link rel="stylesheet" href="./styles.css?v=20261008-7" />
+    <link rel="stylesheet" href="./styles.css?v=20261008-8" />
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
     <script src="https://static.cloudbase.net/cloudbase-js-sdk/3.10.1/cloudbase.full.js" defer></script>
-    <script src="./config.js?v=20261008-7" defer></script>
-    <script src="./app.js?v=20261008-7" defer></script>
+    <script src="./config.js?v=20261008-8" defer></script>
+    <script src="./app.js?v=20261008-8" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -66,18 +66,7 @@
 
         <div class="workspace">
           <section class="view active" id="view-publish">
-            <div class="step-strip" aria-label="发布步骤">
-              <button class="step active" data-step-target="source"><span>1</span>导入资料</button>
-              <button class="step" data-step-target="channel"><span>2</span>店铺与模板</button>
-              <button class="step" data-step-target="review"><span>3</span>检查商品</button>
-              <button class="step" data-step-target="submit"><span>4</span>发布商品</button>
-            </div>
-
             <section class="panel-section" id="source">
-              <div class="section-title">
-                <div><h2>导入商品资料</h2></div>
-                <span class="section-state"><i data-lucide="hard-drive"></i>选择时仅本地检查</span>
-              </div>
               <div class="import-grid">
                 <label class="drop-zone" id="sheetDrop">
                   <input type="file" id="sheetInput" accept=".xlsx,.xls,.csv" />
@@ -97,10 +86,7 @@
             </section>
 
             <section class="panel-section" id="channel">
-              <div class="section-title">
-                <div><h2>调用 ERP 店铺与模板</h2></div>
-                <span class="section-state"><i data-lucide="refresh-cw"></i>正在同步 ERP</span>
-              </div>
+              <span id="erpSyncState" hidden></span>
               <div class="erp-select-grid">
                 <div class="erp-select-column">
                   <span class="erp-field-icon"><i data-lucide="store"></i></span>

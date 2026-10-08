@@ -75,19 +75,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .workspace { max-width: 1440px; margin: 0 auto; padding: 24px 30px 56px; }
 .view { display: none; }
 .view.active { display: block; }
-.step-strip { margin-bottom: 14px; padding: 11px 16px; border: 1px solid var(--line); border-radius: 6px; display: grid; grid-template-columns: repeat(4, 1fr); background: var(--surface); }
-.step { position: relative; min-height: 34px; padding: 0 20px; border: 0; display: flex; align-items: center; justify-content: center; gap: 9px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 650; }
-.step:not(:last-child)::after { content: ""; position: absolute; right: 0; width: 1px; height: 22px; background: var(--line); }
-.step span { width: 24px; height: 24px; border: 1px solid var(--line-strong); border-radius: 50%; display: grid; place-items: center; background: #fff; font-size: 12px; }
-.step.active { color: var(--ink); }
-.step.active span { border-color: var(--orange); background: var(--orange); color: #101820; }
-
 .panel-section { margin-top: 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .section-title { min-height: 77px; padding: 16px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .section-title h2, .list-header h2 { margin: 0; font-size: 17px; letter-spacing: 0; }
 .section-title p, .list-header p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
-.section-state { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; white-space: nowrap; }
-.section-state svg { width: 15px; }
 .import-grid { padding: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .drop-zone { min-height: 142px; padding: 20px; border: 1px dashed #aeb9c2; border-radius: 6px; display: grid; grid-template-columns: 48px 1fr; grid-template-rows: repeat(3, auto); column-gap: 14px; align-content: center; background: #fbfcfc; cursor: pointer; transition: border-color .18s, background .18s; }
 .drop-zone:hover, .drop-zone.drag { border-color: var(--orange); background: #fffaf0; }
@@ -328,13 +319,8 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--orange-d
 @media (max-width: 620px) {
   .account-copy, .account-btn > svg { display: none; }
   .page-heading p { display: none; }
-  .step-strip { grid-template-columns: repeat(4, minmax(54px, 1fr)); padding: 8px 4px; }
-  .step { padding: 0 4px; font-size: 0; }
-  .step:not(:last-child)::after { height: 18px; }
-  .step span { font-size: 11px; }
   .section-title { min-height: 68px; padding: 14px; }
   .section-title p { line-height: 1.45; }
-  .section-state { display: none; }
   .import-grid, .settings-grid { padding: 14px; grid-template-columns: 1fr; }
   .drop-zone { min-height: 128px; padding: 16px; }
   .mapping-row { padding: 14px; gap: 10px 16px; }

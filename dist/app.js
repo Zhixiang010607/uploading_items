@@ -653,7 +653,7 @@ function applyReadOnlyTemplateSync(payload, showResult = false) {
   const storeReady = !storeSelect.disabled && [...storeSelect.options].some((option) => option.value);
   erpReady = storeReady && productCount > 0 && skuCount > 0;
 
-  const sourceState = document.querySelector("#channel .section-state");
+  const sourceState = document.querySelector("#erpSyncState");
   const shopDescription = shopCount ? `${shopCount} 个店铺` : "店铺沿用开放平台数据";
   sourceState.innerHTML = erpReady
     ? '<i data-lucide="circle-check"></i>店铺与模板已同步'
@@ -687,7 +687,7 @@ function handleReadOnlyHelperMessage(event) {
 }
 
 async function syncERP(showResult = false) {
-  const sourceState = document.querySelector("#channel .section-state");
+  const sourceState = document.querySelector("#erpSyncState");
   const storeSelect = document.querySelector("#storeSelect");
   storeSelect.innerHTML = '<option value="">正在读取 ERP…</option>';
   storeSelect.disabled = true;
@@ -810,11 +810,6 @@ function initEvents() {
   });
   document.querySelector("#sidebarClose").addEventListener("click", closeSidebar);
   document.querySelector("#mobileBackdrop").addEventListener("click", closeSidebar);
-  document.querySelectorAll(".step").forEach((step) => step.addEventListener("click", () => {
-    document.querySelectorAll(".step").forEach((item) => item.classList.remove("active"));
-    step.classList.add("active");
-    document.querySelector(`#${step.dataset.stepTarget}`).scrollIntoView({ behavior: "smooth", block: "start" });
-  }));
   document.querySelector("#sheetInput").addEventListener("change", (event) => event.target.files[0] && handleSheetFile(event.target.files[0]));
   document.querySelector("#imageInput").addEventListener("change", (event) => event.target.files.length && inspectImageFolder(event.target.files));
   document.querySelector("#selectAll").addEventListener("change", (event) => {
