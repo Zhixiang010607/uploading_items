@@ -480,9 +480,32 @@ async function importAllImages(batchId, total) {
   if (pending.length) throw new Error(`仍有 ${pending.length} 张图片未成功导入妙手，当前批次已保留，可再次重试`);
 }
 
-async function runPublishFlow() {
+function submissionMode(mode) {
+  return mode === "queue"
+    ? { label: "加入未发布", enabled: APP_CONFIG.queueWritesEnabled }
+    : { label: "直接发布", enabled: APP_CONFIG.directPublishEnabled };
+}
+
+function applySubmissionButtonState(disabled = false) {
+  [
+    ["#queueBtn", "queue"],
+    ["#publishBtn", "publish"]
+  ].forEach(([selector, mode]) => {
+    const button = document.querySelector(selector);
+    const action = submissionMode(mode);
+    button.disabled = disabled || !APP_CONFIG.liveWritesEnabled || !action.enabled;
+    button.title = button.disabled
+      ? `安全锁定：${action.label}接口尚未接通`
+      : action.label;
+  });
+}
+
+async function runPublishFlow(targetMode = "publish") {
   if (publishRunning) return;
-  if (!APP_CONFIG.liveWritesEnabled) return showToast("真实写入尚未启用", "当前为安全测试模式，不会上传、导入或发布真实数据。", "warning");
+  const action = submissionMode(targetMode);
+  if (!APP_CONFIG.liveWritesEnabled || !action.enabled) {
+    return showToast(`${action.label}尚未启用`, "当前为安全测试模式，不会上传、导入或发布真实数据。", "warning");
+  }
   if (!importState.valid) return showToast("资料检查未通过", importState.errors[0] || "请选择完整资料", "warning");
   if (selected.size !== products.length) return showToast("必须提交全部产品", "为保证文件夹不多不少，请保持全部产品选中。", "warning");
   if (!erpReady) return showToast("个人模板尚未同步", "产品模板和 SKU 模板需要通过已登录的妙手网页同步。", "warning");
@@ -493,8 +516,7 @@ async function runPublishFlow() {
 
   publishRunning = true;
   await requestUploadWakeLock();
-  const button = document.querySelector("#publishBtn");
-  button.disabled = true;
+  applySubmissionButtonState(true);
   try {
     const { items, manifestHash } = await buildManifest();
     const requestedId = `batch-${crypto.randomUUID()}`;
@@ -515,14 +537,14 @@ async function runPublishFlow() {
     const verified = await uploadAndVerify(activeBatchId, items);
     setSubmitStatus("云端图片全部核验成功", `${verified.expected_count} 张图片不多、不少，编号和内容均一致。`, verified.expected_count, verified.expected_count, "success");
     await importAllImages(activeBatchId, items.length);
-    setSubmitStatus("全部图片已上传并导入", "图片已完整进入妙手；商品发布接口需在应用权限启用后继续。", items.length, items.length, "success");
+    setSubmitStatus("全部图片已上传并导入", `图片已完整进入妙手；${action.label}接口需在应用权限启用后继续。`, items.length, items.length, "success");
     showToast("整批图片处理完成", `${items.length} 张图片全部上传、校验并导入成功。`, "success");
   } catch (error) {
     setSubmitStatus("发布已暂停", error.message, null, null, "error");
     showToast("商品发布未完成", error.message, "warning");
   } finally {
     publishRunning = false;
-    button.disabled = false;
+    applySubmissionButtonState();
     await releaseUploadWakeLock();
   }
 }
@@ -803,7 +825,8 @@ function initEvents() {
     updateSelectedCount();
   });
   document.querySelector("#productSearch").addEventListener("input", (event) => renderProducts(event.target.value));
-  document.querySelector("#publishBtn").addEventListener("click", runPublishFlow);
+  document.querySelector("#queueBtn").addEventListener("click", () => runPublishFlow("queue"));
+  document.querySelector("#publishBtn").addEventListener("click", () => runPublishFlow("publish"));
   document.querySelector("#refreshERP").addEventListener("click", () => syncERP(true));
   document.querySelector("#skuTemplateSelect").addEventListener("change", () => renderProducts(document.querySelector("#productSearch").value));
   document.querySelector("#filterBtn").addEventListener("click", () => showToast("当前显示全部商品", "可使用搜索框按标题或序号查找。", "success"));
@@ -815,11 +838,7 @@ function initEvents() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  if (!APP_CONFIG.liveWritesEnabled) {
-    const button = document.querySelector("#publishBtn");
-    button.disabled = true;
-    button.title = "安全测试模式：妙手审核通过并经确认后启用";
-  }
+  applySubmissionButtonState();
   renderProducts();
   initEvents();
   refreshImportValidation();
