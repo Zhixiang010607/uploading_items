@@ -1,6 +1,6 @@
 # 妙手模板只读同步
 
-此 Chrome 扩展只读取当前已登录妙手 ERP 账号中的 TEMU 全托管产品模板和 SKU 模板，并把精简后的模板 ID、名称保存到浏览器本地，再提供给 TEMU 商品发布助手。
+此 Chrome 扩展只读取当前已登录妙手 ERP 账号中的 TEMU 全托管店铺、产品模板和 SKU 模板，并把精简后的 ID、名称保存到浏览器本地，再提供给 TEMU 商品发布助手。
 
 ## 安装
 
@@ -18,7 +18,7 @@
 
 ## 权限边界
 
-- 只调用 `searchTemplateList` 和 `searchSkuPropTemplate` 两个 GET 列表接口。
+- 只调用 `getAllShopV2`、`searchTemplateList` 和 `searchSkuPropTemplate` 三个 GET 列表接口；店铺接口不可用时会退回只读的 `getAllShop` GET 接口。
 - 不读取或保存妙手 Cookie、App Secret 或模板完整内容。
 - 不包含新增、修改、删除、上传、导入或发布接口。
 - 发布助手的真实写入开关仍为关闭状态。

@@ -21,7 +21,7 @@ header p { margin: 3px 0 0; color: #6b7781; font-size: 12px; }
 .status-dot.error { background: #c6534f; box-shadow: 0 0 0 4px #f8e7e6; }
 .status-block strong { display: block; font-size: 13px; }
 .status-block p { margin: 5px 0 0; color: #6b7781; font-size: 12px; line-height: 1.5; }
-.counts { margin: 14px 18px 0; display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #dbe1e5; border-radius: 6px; overflow: hidden; }
+.counts { margin: 14px 18px 0; display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #dbe1e5; border-radius: 6px; overflow: hidden; }
 .counts div { min-height: 70px; padding: 12px 14px; }
 .counts div + div { border-left: 1px solid #dbe1e5; }
 .counts dt { color: #6b7781; font-size: 11px; }

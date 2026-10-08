@@ -37,6 +37,7 @@
     await chrome.storage.local.set({ [STORAGE_KEY]: payload });
     return {
       ok: true,
+      shopCount: payload.shops.length,
       productCount: payload.productTemplates.length,
       skuCount: payload.skuTemplates.length,
       syncedAt: payload.syncedAt

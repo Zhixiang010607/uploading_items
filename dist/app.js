@@ -586,6 +586,20 @@ function normalizeReadOnlyTemplates(records, kind) {
   return output;
 }
 
+function normalizeReadOnlyShops(records) {
+  if (!Array.isArray(records)) return [];
+  const output = [];
+  const seen = new Set();
+  for (const record of records.slice(0, 5000)) {
+    const id = recordValue(record, ["id", "shopId"]).trim();
+    const name = recordValue(record, ["name", "shopNick", "platformShopName"]).trim();
+    if (!id || !name || seen.has(id)) continue;
+    seen.add(id);
+    output.push({ id, name });
+  }
+  return output;
+}
+
 function requestReadOnlyTemplateSync() {
   window.postMessage({
     source: PUBLISHER_SOURCE,
@@ -595,19 +609,22 @@ function requestReadOnlyTemplateSync() {
 }
 
 function applyReadOnlyTemplateSync(payload, showResult = false) {
-  if (!payload || payload.version !== 1) return false;
+  if (!payload || ![1, 2].includes(payload.version)) return false;
+  const shops = normalizeReadOnlyShops(payload.shops);
   const productTemplates = normalizeReadOnlyTemplates(payload.productTemplates, "productTemplate");
   const skuTemplates = normalizeReadOnlyTemplates(payload.skuTemplates, "skuTemplate");
   if (!productTemplates.length && !skuTemplates.length) return false;
 
   readOnlyTemplateSync = {
-    version: 1,
+    version: payload.version,
     source: "erp.91miaoshou.com",
     syncedAt: String(payload.syncedAt || ""),
+    shops,
     productTemplates,
     skuTemplates
   };
 
+  const shopCount = shops.length ? fillSelect("#storeSelect", shops, "shop") : 0;
   const productCount = fillSelect("#productTemplateSelect", productTemplates, "productTemplate");
   const skuCount = fillSelect("#skuTemplateSelect", skuTemplates, "skuTemplate");
   const storeSelect = document.querySelector("#storeSelect");
@@ -615,19 +632,20 @@ function applyReadOnlyTemplateSync(payload, showResult = false) {
   erpReady = storeReady && productCount > 0 && skuCount > 0;
 
   const sourceState = document.querySelector("#channel .section-state");
+  const shopDescription = shopCount ? `${shopCount} 个店铺` : "店铺沿用开放平台数据";
   sourceState.innerHTML = erpReady
     ? '<i data-lucide="circle-check"></i>店铺与模板已同步'
     : '<i data-lucide="circle-alert"></i>模板已同步 · 店铺读取中';
-  sourceState.title = `Chrome 辅助插件只读同步：${productCount} 个产品模板，${skuCount} 个 SKU 模板`;
+  sourceState.title = `Chrome 辅助插件只读同步：${shopDescription}，${productCount} 个产品模板，${skuCount} 个 SKU 模板`;
   sourceState.classList.toggle("connected", erpReady);
 
   const connection = document.querySelector(".sidebar-foot .connection-line");
   connection.querySelector("strong").textContent = erpReady ? "只读数据已同步" : "模板已同步";
-  connection.querySelector("span:last-child").textContent = `${productCount} 个产品模板 · ${skuCount} 个 SKU 模板`;
+  connection.querySelector("span:last-child").textContent = `${shopCount ? `${shopCount} 个店铺 · ` : ""}${productCount} 个产品模板 · ${skuCount} 个 SKU 模板`;
   if (showResult) {
     showToast(
       "妙手模板已只读同步",
-      `已读取 ${productCount} 个产品模板和 ${skuCount} 个 SKU 模板，没有执行任何写入。`,
+      `已读取 ${shopCount} 个店铺、${productCount} 个产品模板和 ${skuCount} 个 SKU 模板，没有执行任何写入。`,
       productCount && skuCount ? "success" : "warning"
     );
   }

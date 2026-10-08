@@ -6,6 +6,10 @@
   const RESPONSE_TYPE = "SYNC_READONLY_TEMPLATES_RESULT";
   const PAGE_SIZE = 100;
   const MAX_PAGES = 100;
+  const SHOP_ENDPOINTS = [
+    "/api/auth/shop/getAllShopV2",
+    "/api/auth/shop/getAllShop"
+  ];
   const ENDPOINTS = [
     {
       key: "productTemplates",
@@ -39,12 +43,38 @@
     return "";
   }
 
+  function findRecordArray(value, requiredKey, depth = 0) {
+    if (depth > 6 || value == null) return null;
+    if (Array.isArray(value)) {
+      return value.some((item) => item && typeof item === "object" && requiredKey in item) ? value : null;
+    }
+    if (typeof value !== "object") return null;
+    for (const nested of Object.values(value)) {
+      const found = findRecordArray(nested, requiredKey, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+
   function sanitizeList(records, definition) {
     const output = [];
     const seen = new Set();
     for (const record of records) {
       const id = firstValue(record, definition.idKeys);
       const name = firstValue(record, ["name", "templateName"]);
+      if (!id || !name || seen.has(id)) continue;
+      seen.add(id);
+      output.push({ id, name });
+    }
+    return output;
+  }
+
+  function sanitizeShops(records) {
+    const output = [];
+    const seen = new Set();
+    for (const record of records) {
+      const id = firstValue(record, ["shopId", "shop_id", "id"]);
+      const name = firstValue(record, ["shopNick", "platformShopName", "shopName", "name"]);
       if (!id || !name || seen.has(id)) continue;
       seen.add(id);
       output.push({ id, name });
@@ -97,12 +127,44 @@
     throw new Error("模板数量超过 10000 条，为避免漏读已停止同步");
   }
 
+  async function readShops() {
+    let lastError = null;
+    for (const path of SHOP_ENDPOINTS) {
+      try {
+        const url = new URL(path, window.location.origin);
+        url.searchParams.set("platform", "pddkj");
+        url.searchParams.set("pageNo", "1");
+        url.searchParams.set("pageSize", "100000");
+        const response = await fetch(url, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+          headers: { Accept: "application/json" }
+        });
+        if (!response.ok) throw new Error(`妙手店铺接口返回 HTTP ${response.status}`);
+        const payload = await response.json();
+        assertSuccessfulPayload(payload);
+        const list = findNamedArray(payload, "shopList") || findRecordArray(payload, "shopId") || [];
+        const shops = sanitizeShops(list);
+        if (shops.length) return shops;
+        lastError = new Error("妙手店铺列表为空");
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error("没有读取到妙手店铺名称");
+  }
+
   async function synchronize() {
-    const [productTemplates, skuTemplates] = await Promise.all(ENDPOINTS.map(readAll));
+    const [shops, productTemplates, skuTemplates] = await Promise.all([
+      readShops(),
+      ...ENDPOINTS.map(readAll)
+    ]);
     return {
-      version: 1,
+      version: 2,
       source: "erp.91miaoshou.com",
       syncedAt: new Date().toISOString(),
+      shops,
       productTemplates,
       skuTemplates
     };

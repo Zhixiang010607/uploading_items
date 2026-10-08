@@ -16,14 +16,16 @@ function setStatus(title, message, state = "warning") {
 }
 
 function renderStored(payload) {
+  const shopCount = Array.isArray(payload?.shops) ? payload.shops.length : 0;
   const productCount = Array.isArray(payload?.productTemplates) ? payload.productTemplates.length : 0;
   const skuCount = Array.isArray(payload?.skuTemplates) ? payload.skuTemplates.length : 0;
+  document.querySelector("#shopCount").textContent = String(shopCount);
   document.querySelector("#productCount").textContent = String(productCount);
   document.querySelector("#skuCount").textContent = String(skuCount);
   document.querySelector("#syncedAt").textContent = payload?.syncedAt
     ? `上次同步：${new Date(payload.syncedAt).toLocaleString("zh-CN", { hour12: false })}`
     : "尚未同步";
-  return { productCount, skuCount };
+  return { shopCount, productCount, skuCount };
 }
 
 async function activeTab() {
@@ -46,7 +48,7 @@ async function initialize() {
   if (isMiaoshouTab(tab)) {
     syncBtn.disabled = false;
     setStatus("妙手页面已就绪", "点击同步后只读取产品模板和 SKU 模板。", "success");
-  } else if (counts.productCount || counts.skuCount) {
+  } else if (counts.shopCount || counts.productCount || counts.skuCount) {
     setStatus("已有只读同步记录", "需要更新时，请先打开已登录的妙手页面。", "success");
   } else {
     setStatus("等待妙手页面", "请先打开并登录妙手 ERP，再回到这里同步。", "warning");
@@ -64,7 +66,7 @@ syncBtn.addEventListener("click", async () => {
     if (!response?.ok) throw new Error(response?.error || "插件没有收到同步结果");
     const stored = await chrome.storage.local.get(STORAGE_KEY);
     renderStored(stored[STORAGE_KEY]);
-    setStatus("只读同步完成", `产品模板 ${response.productCount} 个，SKU 模板 ${response.skuCount} 个。`, "success");
+    setStatus("只读同步完成", `店铺 ${response.shopCount} 个，产品模板 ${response.productCount} 个，SKU 模板 ${response.skuCount} 个。`, "success");
   } catch (error) {
     const detail = String(error?.message || error);
     const message = detail.includes("Receiving end does not exist")
