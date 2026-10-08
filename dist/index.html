@@ -14,12 +14,12 @@
       type="image/svg+xml"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23101820'/%3E%3Cpath d='M13 17h38v10H37v24H27V27H13z' fill='%23f6a800'/%3E%3C/svg%3E"
     />
-    <link rel="stylesheet" href="./styles.css?v=20261008-2" />
+    <link rel="stylesheet" href="./styles.css?v=20261008-3" />
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
     <script src="https://static.cloudbase.net/cloudbase-js-sdk/3.10.1/cloudbase.full.js" defer></script>
-    <script src="./config.js?v=20261008-2" defer></script>
-    <script src="./app.js?v=20261008-2" defer></script>
+    <script src="./config.js?v=20261008-3" defer></script>
+    <script src="./app.js?v=20261008-3" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -98,7 +98,7 @@
 
             <section class="panel-section" id="channel">
               <div class="section-title">
-                <div><h2>调用 ERP 店铺与模板</h2><p>只读取 ERP 中已经建立好的店铺、产品模板和 SKU 模板，本网站不创建模板。</p></div>
+                <div><h2>调用 ERP 店铺与模板</h2><p>读取 ERP 已绑定店铺；个人产品模板和 SKU 模板需要妙手网页登录同步。</p></div>
                 <span class="section-state"><i data-lucide="refresh-cw"></i>正在同步 ERP</span>
               </div>
               <div class="erp-select-grid">
@@ -114,7 +114,7 @@
                   <span class="erp-field-icon product"><i data-lucide="layout-template"></i></span>
                   <div class="field">
                     <label for="productTemplateSelect">产品模板</label>
-                    <select id="productTemplateSelect" disabled><option value="">正在读取 ERP…</option></select>
+                    <select id="productTemplateSelect" disabled><option value="">需要妙手网页登录同步</option></select>
                   </div>
                   <small>标题规则、描述、类目、轮播图位置</small>
                 </div>
@@ -122,13 +122,13 @@
                   <span class="erp-field-icon sku"><i data-lucide="scan-barcode"></i></span>
                   <div class="field">
                     <label for="skuTemplateSelect">SKU 模板</label>
-                    <select id="skuTemplateSelect" disabled><option value="">正在读取 ERP…</option></select>
+                    <select id="skuTemplateSelect" disabled><option value="">需要妙手网页登录同步</option></select>
                   </div>
                   <small>SKU 编码、规格、价格和库存</small>
                 </div>
               </div>
               <div class="erp-source-note">
-                <span><i data-lucide="database"></i>来源：ERP 已授权店铺和已建立模板</span>
+                <span><i data-lucide="database"></i>来源：ERP 开放平台；个人模板需网页会话同步</span>
                 <button class="text-btn" id="refreshERP">重新读取 ERP</button>
               </div>
             </section>
