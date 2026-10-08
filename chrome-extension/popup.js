@@ -47,7 +47,7 @@ async function initialize() {
   const tab = await activeTab();
   if (isMiaoshouTab(tab)) {
     syncBtn.disabled = false;
-    setStatus("妙手页面已就绪", "点击同步后只读取产品模板和 SKU 模板。", "success");
+    setStatus("妙手页面已就绪", "点击后同步产品模板和 SKU 模板。", "success");
   } else if (counts.shopCount || counts.productCount || counts.skuCount) {
     setStatus("已有只读同步记录", "需要更新时，请先打开已登录的妙手页面。", "success");
   } else {
@@ -57,7 +57,7 @@ async function initialize() {
 
 syncBtn.addEventListener("click", async () => {
   syncBtn.disabled = true;
-  syncBtn.textContent = "正在只读同步…";
+  syncBtn.textContent = "正在同步…";
   setStatus("正在读取模板", "将自动读取全部分页，请保持妙手页面开启。", "warning");
   try {
     const tab = await activeTab();

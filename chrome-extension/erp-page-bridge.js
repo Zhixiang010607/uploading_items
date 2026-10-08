@@ -4,6 +4,9 @@
   const CHANNEL = "temu-readonly-helper-bridge";
   const REQUEST_TYPE = "SYNC_READONLY_TEMPLATES";
   const RESPONSE_TYPE = "SYNC_READONLY_TEMPLATES_RESULT";
+  const DRAFT_REQUEST_TYPE = "CREATE_TEMPLATE_DRAFTS";
+  const DRAFT_RESPONSE_TYPE = "CREATE_TEMPLATE_DRAFTS_RESULT";
+  const ERP_COLLECT_BOX_BASE = "/api/platform/pddkj/move/collect_box/";
   const PAGE_SIZE = 100;
   const MAX_PAGES = 100;
   const SHOP_ENDPOINTS = [
@@ -170,15 +173,118 @@
     };
   }
 
+  async function postErp(path, body) {
+    const response = await fetch(new URL(path, window.location.origin), {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new Error("妙手登录状态不可用，请重新登录妙手 ERP");
+    }
+    if (!response.ok) throw new Error(payload?.reason || payload?.message || `妙手接口返回 HTTP ${response.status}`);
+    assertSuccessfulPayload(payload);
+    return payload;
+  }
+
+  function collectItemInfo(payload) {
+    const core = globalThis.TemuTemplateDraftCore;
+    const named = core.findNamedObject(payload, ["siteCollectItemInfo", "collectItemInfo", "shopCollectItemInfo"]);
+    if (named) return named;
+    const data = payload?.data;
+    if (data && typeof data === "object" && !Array.isArray(data)) return data;
+    throw new Error("妙手没有返回可用的模板内容");
+  }
+
+  function findDetailId(payload, depth = 0) {
+    if (depth > 7 || payload == null) return "";
+    if (typeof payload !== "object") return "";
+    for (const key of ["collectBoxDetailId", "detailId", "id"]) {
+      if (payload[key] !== undefined && payload[key] !== null && String(payload[key]).trim()) {
+        return String(payload[key]).trim();
+      }
+    }
+    for (const value of Object.values(payload)) {
+      const found = findDetailId(value, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  }
+
+  async function buildCombinedTemplate(job) {
+    const core = globalThis.TemuTemplateDraftCore;
+    const productTemplate = await postErp(`${ERP_COLLECT_BOX_BASE}getSiteCollectItemInfoByShopItemTemplate`, {
+      site: core.SITE,
+      shopIds: [job.shopId],
+      itemTemplateId: job.productTemplateId,
+      shopIdAndItemTemplateIdMap: { [job.shopId]: job.productTemplateId }
+    });
+    const productInfo = collectItemInfo(productTemplate);
+    const skuTemplate = await postErp(`${ERP_COLLECT_BOX_BASE}rebuildCollectItemInfoBySkuTemplate`, {
+      skuPropTemplateId: job.skuTemplateId,
+      collectItemInfo: JSON.stringify(productInfo),
+      applicationType: "cover",
+      coverType: "completeCover"
+    });
+    return collectItemInfo(skuTemplate);
+  }
+
+  async function createTemplateDrafts(input) {
+    const core = globalThis.TemuTemplateDraftCore;
+    if (!core) throw new Error("模板草稿组件没有加载，请刷新妙手页面");
+    const job = core.normalizeDraftJob(input);
+    if (!job.dryRun && (job.mode !== "queue" || job.confirmation !== "CREATE_UNPUBLISHED_ONLY_V1")) {
+      throw new Error("仅允许创建未发布草稿，安全确认无效");
+    }
+
+    const combinedTemplate = await buildCombinedTemplate(job);
+    if (job.dryRun) {
+      const preview = core.applyProductOverrides(combinedTemplate, job.products[0], job.shopId);
+      return {
+        dryRun: true,
+        productCount: job.products.length,
+        firstProduct: {
+          index: 1,
+          title: preview.title,
+          imageCount: preview.imgUrls?.length || 0,
+          previewImage: preview.imgUrls?.[0] || "",
+          hasCategory: Boolean(preview.cid),
+          skuCount: Object.keys(preview.skuMap || {}).length || preview.skuList?.length || 0
+        }
+      };
+    }
+
+    const results = [];
+    for (const product of job.products) {
+      const payload = core.buildCreatePayload(combinedTemplate, product, job.shopId);
+      const created = await postErp(`${ERP_COLLECT_BOX_BASE}createCollectBoxItem`, payload);
+      const collectBoxDetailId = findDetailId(created);
+      if (!collectBoxDetailId) throw new Error(`产品 ${product.index} 已请求创建，但妙手未返回商品 ID，任务已停止`);
+      results.push({ index: product.index, collectBoxDetailId });
+    }
+    return { dryRun: false, createdCount: results.length, results };
+  }
+
   window.addEventListener("message", async (event) => {
     if (event.source !== window || event.origin !== window.location.origin) return;
     const message = event.data;
-    if (message?.channel !== CHANNEL || message.type !== REQUEST_TYPE || !message.requestId) return;
+    if (message?.channel !== CHANNEL || !message.requestId) return;
+    const isSync = message.type === REQUEST_TYPE;
+    const isDraft = message.type === DRAFT_REQUEST_TYPE;
+    if (!isSync && !isDraft) return;
     try {
-      const payload = await synchronize();
+      const payload = isSync ? await synchronize() : await createTemplateDrafts(message.payload);
       window.postMessage({
         channel: CHANNEL,
-        type: RESPONSE_TYPE,
+        type: isSync ? RESPONSE_TYPE : DRAFT_RESPONSE_TYPE,
         requestId: message.requestId,
         ok: true,
         payload
@@ -186,10 +292,10 @@
     } catch (error) {
       window.postMessage({
         channel: CHANNEL,
-        type: RESPONSE_TYPE,
+        type: isSync ? RESPONSE_TYPE : DRAFT_RESPONSE_TYPE,
         requestId: message.requestId,
         ok: false,
-        error: error instanceof Error ? error.message : "妙手模板同步失败"
+        error: error instanceof Error ? error.message : (isSync ? "妙手模板同步失败" : "创建未发布草稿失败")
       }, window.location.origin);
     }
   });

@@ -16,6 +16,7 @@ let publishRunning = false;
 let uploadWakeLock = null;
 let erpReady = false;
 let readOnlyTemplateSync = null;
+const templateDraftRequests = new Map();
 let activeBatchId = localStorage.getItem("temu-active-batch") || "";
 let importState = emptyImportState();
 
@@ -537,8 +538,18 @@ async function runPublishFlow(targetMode = "publish") {
     const verified = await uploadAndVerify(activeBatchId, items);
     setSubmitStatus("云端图片全部核验成功", `${verified.expected_count} 张图片不多、不少，编号和内容均一致。`, verified.expected_count, verified.expected_count, "success");
     await importAllImages(activeBatchId, items.length);
-    setSubmitStatus("全部图片已上传并导入", `图片已完整进入妙手；${action.label}接口需在应用权限启用后继续。`, items.length, items.length, "success");
-    showToast("整批图片处理完成", `${items.length} 张图片全部上传、校验并导入成功。`, "success");
+    if (targetMode !== "queue") {
+      throw new Error("直接发布仍处于安全锁定状态；当前只实现创建未发布草稿");
+    }
+    const batchStatus = await api(`/batches/${activeBatchId}`);
+    const draftJob = buildTemplateDraftJob(batchStatus);
+    setSubmitStatus("正在套用产品与 SKU 模板", "每个产品依次创建为妙手未发布草稿。", 0, products.length, "warning");
+    const draftResult = await requestTemplateDraftJob(draftJob);
+    if (draftResult?.createdCount !== products.length) {
+      throw new Error(`草稿创建数量不一致：应有 ${products.length} 条，实际 ${draftResult?.createdCount || 0} 条`);
+    }
+    setSubmitStatus("未发布草稿全部创建完成", `${products.length} 个产品均已套用两个模板。`, products.length, products.length, "success");
+    showToast("未发布草稿创建完成", `${products.length} 个产品已进入妙手未发布列表。`, "success");
   } catch (error) {
     setSubmitStatus("发布已暂停", error.message, null, null, "error");
     showToast("商品发布未完成", error.message, "warning");
@@ -630,6 +641,45 @@ function requestReadOnlyTemplateSync() {
   }, window.location.origin);
 }
 
+function requestTemplateDraftJob(payload) {
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      templateDraftRequests.delete(requestId);
+      reject(new Error("Chrome 草稿助手处理超时，请保持妙手页面开启"));
+    }, 30 * 60 * 1000);
+    templateDraftRequests.set(requestId, { resolve, reject, timeoutId });
+    window.postMessage({
+      source: PUBLISHER_SOURCE,
+      type: "REQUEST_TEMPLATE_DRAFT_JOB",
+      requestId,
+      payload
+    }, window.location.origin);
+  });
+}
+
+function buildTemplateDraftJob(batchStatus) {
+  const imageMap = new Map();
+  for (const item of batchStatus.items || []) {
+    if (item.erp_status !== "imported" || !item.erp_image_url) {
+      throw new Error(`图片 ${item.product_index}.${item.image_position} 尚未完整导入妙手`);
+    }
+    imageMap.set(`${item.product_index}.${item.image_position}`, item.erp_image_url);
+  }
+  return {
+    mode: "queue",
+    confirmation: "CREATE_UNPUBLISHED_ONLY_V1",
+    shopId: getSelectedValue("#storeSelect"),
+    productTemplateId: getSelectedValue("#productTemplateSelect"),
+    skuTemplateId: getSelectedValue("#skuTemplateSelect"),
+    products: products.map((product, offset) => ({
+      index: offset + 1,
+      title: product.title,
+      images: Array.from({ length: 6 }, (_, position) => imageMap.get(`${offset + 1}.${position + 1}`) || "")
+    }))
+  };
+}
+
 function applyReadOnlyTemplateSync(payload, showResult = false) {
   if (!payload || ![1, 2].includes(payload.version)) return false;
   const shops = normalizeReadOnlyShops(payload.shops);
@@ -675,7 +725,18 @@ function applyReadOnlyTemplateSync(payload, showResult = false) {
 function handleReadOnlyHelperMessage(event) {
   if (event.source !== window || event.origin !== window.location.origin) return;
   const message = event.data;
-  if (message?.source !== READONLY_HELPER_SOURCE || message.type !== "READONLY_TEMPLATE_DATA") return;
+  if (message?.source !== READONLY_HELPER_SOURCE) return;
+  if (message.type === "TEMPLATE_DRAFT_JOB_RESULT" && message.requestId) {
+    const pending = templateDraftRequests.get(message.requestId);
+    if (!pending) return;
+    window.clearTimeout(pending.timeoutId);
+    templateDraftRequests.delete(message.requestId);
+    message.ok
+      ? pending.resolve(message.payload)
+      : pending.reject(new Error(message.error || "创建未发布草稿失败"));
+    return;
+  }
+  if (message.type !== "READONLY_TEMPLATE_DATA") return;
   if (message.ok === false) {
     if (message.error) showToast("只读插件同步失败", message.error, "warning");
     return;

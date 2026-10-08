@@ -186,7 +186,7 @@ async function batchStatus(db, batchId, includeItems = false) {
     result.items = await readBatchItems(
       db,
       batchId,
-      "product_index,image_position,object_key,size_bytes,sha256,mime_type,storage_status,erp_status,error_message"
+      "product_index,image_position,object_key,size_bytes,sha256,mime_type,storage_status,erp_status,erp_image_url,error_message"
     );
   }
   return result;

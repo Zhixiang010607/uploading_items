@@ -1,12 +1,19 @@
 {
   "manifest_version": 3,
-  "name": "妙手模板只读同步",
-  "version": "1.1.0",
-  "description": "从已登录的妙手 ERP 只读同步 TEMU 全托管店铺、产品模板和 SKU 模板。",
+  "name": "妙手模板与草稿助手",
+  "version": "1.2.0",
+  "description": "同步 TEMU 全托管店铺与模板，并在发布助手明确请求时创建未发布草稿。",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "tabs"
   ],
+  "host_permissions": [
+    "https://erp.91miaoshou.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_title": "妙手模板只读同步",
     "default_popup": "popup.html"
@@ -17,6 +24,7 @@
         "https://erp.91miaoshou.com/*"
       ],
       "js": [
+        "template-draft-core.js",
         "erp-page-bridge.js"
       ],
       "run_at": "document_start",
