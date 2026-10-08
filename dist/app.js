@@ -569,12 +569,6 @@ async function syncERP(showResult = false) {
   });
   try {
     await api("/health");
-    const shopsResponse = await api("/erp/read", {
-      method: "POST",
-      body: { resource: "shops", params: { platform: "pddkj", site: "PDDKJ", pageNo: 1, pageSize: 100 } }
-    });
-    const shops = findRecordArray(shopsResponse);
-    if (!fillSelect("#storeSelect", shops, "shop")) throw new Error("妙手接口已连接，但没有读取到已绑定店铺");
     const templatesResponse = await api("/erp/read", {
       method: "POST",
       body: { resource: "productTemplates", params: { pageNo: 0, pageSize: 500, filter: {} } }
@@ -582,12 +576,43 @@ async function syncERP(showResult = false) {
     const templates = findRecordArray(templatesResponse);
     if (!fillSelect("#productTemplateSelect", templates, "template")) throw new Error("没有读取到可用产品模板");
     fillSelect("#skuTemplateSelect", templates, "template");
+
+    let shops = [];
+    let usingTemplateShopIds = false;
+    try {
+      const shopsResponse = await api("/erp/read", {
+        method: "POST",
+        body: { resource: "shops", params: { platform: "pddkj", site: "PDDKJ", pageNo: 1, pageSize: 100 } }
+      });
+      shops = findRecordArray(shopsResponse);
+    } catch {
+      const shopsById = new Map();
+      for (const template of templates) {
+        for (const binding of template.collectBoxDetailShopList || []) {
+          const shopId = recordValue(binding, ["shopId", "shop_id", "id"]);
+          if (shopId) shopsById.set(shopId, { shopId, shopNick: `店铺 ID ${shopId}` });
+        }
+      }
+      shops = [...shopsById.values()];
+      usingTemplateShopIds = shops.length > 0;
+    }
+    if (!fillSelect("#storeSelect", shops, "shop")) throw new Error("妙手接口已连接，但没有读取到已绑定店铺");
+
     erpReady = true;
-    sourceState.innerHTML = '<i data-lucide="circle-check"></i>ERP 数据已同步';
+    sourceState.innerHTML = `<i data-lucide="circle-check"></i>${usingTemplateShopIds ? "ERP 模板已同步" : "ERP 数据已同步"}`;
+    sourceState.title = usingTemplateShopIds ? "店铺列表权限尚未开放，当前使用模板中绑定的店铺 ID。" : "";
     sourceState.classList.add("connected");
     document.querySelector(".sidebar-foot .connection-line strong").textContent = "云端已连接";
-    document.querySelector(".sidebar-foot .connection-line span:last-child").textContent = "腾讯云与妙手可用";
-    if (showResult) showToast("妙手连接正常", `已读取 ${shops.length} 个店铺和 ${templates.length} 个模板。`, "success");
+    document.querySelector(".sidebar-foot .connection-line span:last-child").textContent = usingTemplateShopIds
+      ? "妙手模板可用（店铺 ID 模式）"
+      : "腾讯云与妙手可用";
+    if (showResult) {
+      showToast(
+        "妙手数据已读取",
+        `已读取 ${shops.length} 个店铺${usingTemplateShopIds ? " ID" : ""}和 ${templates.length} 个模板。`,
+        usingTemplateShopIds ? "warning" : "success"
+      );
+    }
   } catch (error) {
     erpReady = false;
     ["#storeSelect", "#productTemplateSelect", "#skuTemplateSelect"].forEach((selector) => {
@@ -597,6 +622,7 @@ async function syncERP(showResult = false) {
     });
     sourceState.innerHTML = '<i data-lucide="circle-alert"></i>ERP 连接失败';
     sourceState.title = error.message;
+    sourceState.classList.remove("connected");
     document.querySelector(".sidebar-foot .connection-line strong").textContent = "腾讯云已连接";
     document.querySelector(".sidebar-foot .connection-line span:last-child").textContent = `妙手：${error.message}`;
     if (showResult) showToast("妙手连接失败", error.message, "warning");
