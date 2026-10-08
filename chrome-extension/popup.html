@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>妙手模板只读同步</title>
+    <link rel="stylesheet" href="popup.css" />
+    <script src="popup.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="brand-mark">T</span>
+        <div>
+          <h1>妙手模板只读同步</h1>
+          <p>TEMU 全托管</p>
+        </div>
+        <span class="readonly-badge">只读</span>
+      </header>
+
+      <section class="status-block" aria-live="polite">
+        <span class="status-dot" id="statusDot"></span>
+        <div>
+          <strong id="statusTitle">正在检查</strong>
+          <p id="statusText">读取当前标签页和本地同步记录</p>
+        </div>
+      </section>
+
+      <dl class="counts">
+        <div><dt>产品模板</dt><dd id="productCount">0</dd></div>
+        <div><dt>SKU 模板</dt><dd id="skuCount">0</dd></div>
+      </dl>
+      <p class="synced-at" id="syncedAt">尚未同步</p>
+
+      <button class="primary" id="syncBtn" disabled>从当前妙手页面同步</button>
+      <div class="links">
+        <button id="openErpBtn">打开妙手模板页</button>
+        <button id="openPublisherBtn">打开发布助手</button>
+      </div>
+
+      <footer>
+        仅调用模板列表 GET 接口，不具备新增、修改、删除或发布能力。
+      </footer>
+    </main>
+  </body>
+</html>

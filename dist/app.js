@@ -1,6 +1,8 @@
 const APP_CONFIG = window.TEMU_APP_CONFIG;
 const UPLOAD_CONCURRENCY = 6;
 const UPLOAD_ATTEMPT_TIMEOUT_MS = 60000;
+const READONLY_HELPER_SOURCE = "temu-readonly-helper";
+const PUBLISHER_SOURCE = "temu-publisher";
 const cloudApp = window.cloudbase?.init({
   env: APP_CONFIG.envId,
   accessKey: APP_CONFIG.publishableKey
@@ -13,6 +15,7 @@ let imageFilesBySlot = new Map();
 let publishRunning = false;
 let uploadWakeLock = null;
 let erpReady = false;
+let readOnlyTemplateSync = null;
 let activeBatchId = localStorage.getItem("temu-active-batch") || "";
 let importState = emptyImportState();
 
@@ -548,8 +551,15 @@ function recordValue(record, keys) {
 
 function fillSelect(selector, records, kind) {
   const select = document.querySelector(selector);
-  const idKeys = kind === "shop" ? ["shopId", "shop_id", "id"] : ["detailId", "collectBoxDetailId", "templateId", "id"];
-  const nameKeys = kind === "shop" ? ["shopNick", "shopName", "shop_name", "name", "mallName"] : ["title", "productTitle", "goodsName", "templateName", "name"];
+  const previousValue = select.value;
+  const idKeys = kind === "shop"
+    ? ["shopId", "shop_id", "id"]
+    : kind === "skuTemplate"
+      ? ["skuPropTemplateId", "templateId", "id"]
+      : ["itemTemplateId", "detailId", "collectBoxDetailId", "templateId", "id"];
+  const nameKeys = kind === "shop"
+    ? ["shopNick", "shopName", "shop_name", "name", "mallName"]
+    : ["name", "templateName", "title", "productTitle", "goodsName"];
   const options = records.map((record, index) => {
     const value = recordValue(record, idKeys);
     const label = recordValue(record, nameKeys) || `${kind === "shop" ? "店铺" : "模板"} ${index + 1}`;
@@ -557,7 +567,83 @@ function fillSelect(selector, records, kind) {
   }).filter(Boolean);
   select.innerHTML = options.length ? `<option value="">请选择</option>${options.join("")}` : '<option value="">没有可用数据</option>';
   select.disabled = !options.length;
+  if (previousValue && [...select.options].some((option) => option.value === previousValue)) select.value = previousValue;
   return options.length;
+}
+
+function normalizeReadOnlyTemplates(records, kind) {
+  if (!Array.isArray(records)) return [];
+  const idKeys = kind === "skuTemplate" ? ["id", "skuPropTemplateId"] : ["id", "itemTemplateId"];
+  const output = [];
+  const seen = new Set();
+  for (const record of records.slice(0, 5000)) {
+    const id = recordValue(record, idKeys).trim();
+    const name = recordValue(record, ["name", "templateName"]).trim();
+    if (!id || !name || seen.has(id)) continue;
+    seen.add(id);
+    output.push({ id, name });
+  }
+  return output;
+}
+
+function requestReadOnlyTemplateSync() {
+  window.postMessage({
+    source: PUBLISHER_SOURCE,
+    type: "REQUEST_READONLY_TEMPLATE_DATA",
+    version: 1
+  }, window.location.origin);
+}
+
+function applyReadOnlyTemplateSync(payload, showResult = false) {
+  if (!payload || payload.version !== 1) return false;
+  const productTemplates = normalizeReadOnlyTemplates(payload.productTemplates, "productTemplate");
+  const skuTemplates = normalizeReadOnlyTemplates(payload.skuTemplates, "skuTemplate");
+  if (!productTemplates.length && !skuTemplates.length) return false;
+
+  readOnlyTemplateSync = {
+    version: 1,
+    source: "erp.91miaoshou.com",
+    syncedAt: String(payload.syncedAt || ""),
+    productTemplates,
+    skuTemplates
+  };
+
+  const productCount = fillSelect("#productTemplateSelect", productTemplates, "productTemplate");
+  const skuCount = fillSelect("#skuTemplateSelect", skuTemplates, "skuTemplate");
+  const storeSelect = document.querySelector("#storeSelect");
+  const storeReady = !storeSelect.disabled && [...storeSelect.options].some((option) => option.value);
+  erpReady = storeReady && productCount > 0 && skuCount > 0;
+
+  const sourceState = document.querySelector("#channel .section-state");
+  sourceState.innerHTML = erpReady
+    ? '<i data-lucide="circle-check"></i>店铺与模板已同步'
+    : '<i data-lucide="circle-alert"></i>模板已同步 · 店铺读取中';
+  sourceState.title = `Chrome 辅助插件只读同步：${productCount} 个产品模板，${skuCount} 个 SKU 模板`;
+  sourceState.classList.toggle("connected", erpReady);
+
+  const connection = document.querySelector(".sidebar-foot .connection-line");
+  connection.querySelector("strong").textContent = erpReady ? "只读数据已同步" : "模板已同步";
+  connection.querySelector("span:last-child").textContent = `${productCount} 个产品模板 · ${skuCount} 个 SKU 模板`;
+  if (showResult) {
+    showToast(
+      "妙手模板已只读同步",
+      `已读取 ${productCount} 个产品模板和 ${skuCount} 个 SKU 模板，没有执行任何写入。`,
+      productCount && skuCount ? "success" : "warning"
+    );
+  }
+  iconRefresh();
+  return true;
+}
+
+function handleReadOnlyHelperMessage(event) {
+  if (event.source !== window || event.origin !== window.location.origin) return;
+  const message = event.data;
+  if (message?.source !== READONLY_HELPER_SOURCE || message.type !== "READONLY_TEMPLATE_DATA") return;
+  if (message.ok === false) {
+    if (message.error) showToast("只读插件同步失败", message.error, "warning");
+    return;
+  }
+  applyReadOnlyTemplateSync(message.payload, Boolean(message.fresh));
 }
 
 async function syncERP(showResult = false) {
@@ -565,11 +651,14 @@ async function syncERP(showResult = false) {
   const storeSelect = document.querySelector("#storeSelect");
   storeSelect.innerHTML = '<option value="">正在读取 ERP…</option>';
   storeSelect.disabled = true;
-  ["#productTemplateSelect", "#skuTemplateSelect"].forEach((selector) => {
-    const select = document.querySelector(selector);
-    select.innerHTML = '<option value="">需要妙手网页登录同步</option>';
-    select.disabled = true;
-  });
+  if (!readOnlyTemplateSync) {
+    ["#productTemplateSelect", "#skuTemplateSelect"].forEach((selector) => {
+      const select = document.querySelector(selector);
+      select.innerHTML = '<option value="">需要 Chrome 只读插件同步</option>';
+      select.disabled = true;
+    });
+  }
+  requestReadOnlyTemplateSync();
   try {
     await api("/health");
     const productsResponse = await api("/erp/read", {
@@ -599,20 +688,24 @@ async function syncERP(showResult = false) {
     }
     if (!fillSelect("#storeSelect", shops, "shop")) throw new Error("妙手接口已连接，但没有读取到已绑定店铺");
 
-    erpReady = false;
-    sourceState.innerHTML = '<i data-lucide="circle-alert"></i>店铺已读取 · 模板等待同步';
-    sourceState.title = usingProductShopIds
-      ? "店铺列表权限尚未开放，店铺 ID 来自采集箱绑定关系；个人模板需要妙手网页登录会话同步。"
-      : "个人产品模板和 SKU 模板需要妙手网页登录会话同步。";
-    sourceState.classList.remove("connected");
-    document.querySelector(".sidebar-foot .connection-line strong").textContent = "云端已连接";
-    document.querySelector(".sidebar-foot .connection-line span:last-child").textContent = "妙手店铺可用 · 个人模板等待同步";
-    if (showResult) {
-      showToast(
-        "妙手店铺已读取",
-        `已读取 ${shops.length} 个店铺${usingProductShopIds ? " ID" : ""}；个人产品模板和 SKU 模板需要网页登录同步。`,
-        "warning"
-      );
+    if (readOnlyTemplateSync) {
+      applyReadOnlyTemplateSync(readOnlyTemplateSync, showResult);
+    } else {
+      erpReady = false;
+      sourceState.innerHTML = '<i data-lucide="circle-alert"></i>店铺已读取 · 模板等待插件同步';
+      sourceState.title = usingProductShopIds
+        ? "店铺 ID 已读取；请在已登录的妙手模板页面点击 Chrome 辅助插件进行只读同步。"
+        : "请在已登录的妙手模板页面点击 Chrome 辅助插件进行只读同步。";
+      sourceState.classList.remove("connected");
+      document.querySelector(".sidebar-foot .connection-line strong").textContent = "云端已连接";
+      document.querySelector(".sidebar-foot .connection-line span:last-child").textContent = "妙手店铺可用 · 模板等待只读同步";
+      if (showResult) {
+        showToast(
+          "妙手店铺已读取",
+          `已读取 ${shops.length} 个店铺${usingProductShopIds ? " ID" : ""}；产品模板和 SKU 模板等待 Chrome 插件同步。`,
+          "warning"
+        );
+      }
     }
   } catch (error) {
     erpReady = false;
@@ -623,10 +716,13 @@ async function syncERP(showResult = false) {
     sourceState.classList.remove("connected");
     document.querySelector(".sidebar-foot .connection-line strong").textContent = "腾讯云已连接";
     document.querySelector(".sidebar-foot .connection-line span:last-child").textContent = `妙手：${error.message}`;
+    if (readOnlyTemplateSync) applyReadOnlyTemplateSync(readOnlyTemplateSync, false);
     if (showResult) showToast("妙手连接失败", error.message, "warning");
   }
   iconRefresh();
 }
+
+window.addEventListener("message", handleReadOnlyHelperMessage);
 
 function openDialog(title, subtitle, body) {
   document.querySelector("#dialogTitle").textContent = title;
